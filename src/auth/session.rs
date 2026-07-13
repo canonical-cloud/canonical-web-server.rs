@@ -8,7 +8,7 @@ use crate::{
 };
 use aes_gcm::{
     aead::{Aead, KeyInit},
-    Aes256Gcm, Nonce,
+    Aes256Gcm,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{Duration as ChronoDuration, Utc};
@@ -238,9 +238,13 @@ impl SessionService {
 
     fn encrypt(&self, plaintext: &str) -> Result<String, AppError> {
         let nonce_bytes: [u8; 12] = rand::random();
+        let nonce = nonce_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| AppError::Crypto)?;
         let ciphertext = self
             .cipher
-            .encrypt(Nonce::from_slice(&nonce_bytes), plaintext.as_bytes())
+            .encrypt(nonce, plaintext.as_bytes())
             .map_err(|_| AppError::Crypto)?;
         let mut encoded = nonce_bytes.to_vec();
         encoded.extend(ciphertext);
@@ -251,10 +255,11 @@ impl SessionService {
         let bytes = URL_SAFE_NO_PAD
             .decode(encoded)
             .map_err(|_| AppError::Crypto)?;
-        let (nonce, ciphertext) = bytes.split_at_checked(12).ok_or(AppError::Crypto)?;
+        let (nonce_bytes, ciphertext) = bytes.split_at_checked(12).ok_or(AppError::Crypto)?;
+        let nonce = nonce_bytes.try_into().map_err(|_| AppError::Crypto)?;
         let plaintext = self
             .cipher
-            .decrypt(Nonce::from_slice(nonce), ciphertext)
+            .decrypt(nonce, ciphertext)
             .map_err(|_| AppError::Crypto)?;
         String::from_utf8(plaintext).map_err(|_| AppError::Crypto)
     }

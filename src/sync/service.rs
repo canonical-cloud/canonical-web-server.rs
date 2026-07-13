@@ -14,7 +14,7 @@ use crate::{
 };
 use aes_gcm::{
     aead::{Aead, KeyInit},
-    Aes256Gcm, Nonce,
+    Aes256Gcm,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::Utc;
@@ -443,6 +443,10 @@ impl CursorCodec {
 
     fn encode(&self, owner_id: Uuid, position: i64, high_water: i64) -> Result<String, AppError> {
         let nonce_bytes: [u8; 12] = rand::random();
+        let nonce = nonce_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| AppError::Crypto)?;
         let plaintext = serde_json::to_vec(&CursorPayload {
             owner_id,
             position,
@@ -450,7 +454,7 @@ impl CursorCodec {
         })?;
         let ciphertext = self
             .0
-            .encrypt(Nonce::from_slice(&nonce_bytes), plaintext.as_ref())
+            .encrypt(nonce, plaintext.as_ref())
             .map_err(|_| AppError::Crypto)?;
         let mut bytes = nonce_bytes.to_vec();
         bytes.extend(ciphertext);
@@ -461,12 +465,15 @@ impl CursorCodec {
         let bytes = URL_SAFE_NO_PAD
             .decode(cursor)
             .map_err(|_| AppError::InvalidSyncCursor)?;
-        let (nonce, ciphertext) = bytes
+        let (nonce_bytes, ciphertext) = bytes
             .split_at_checked(12)
             .ok_or(AppError::InvalidSyncCursor)?;
+        let nonce = nonce_bytes
+            .try_into()
+            .map_err(|_| AppError::InvalidSyncCursor)?;
         let plaintext = self
             .0
-            .decrypt(Nonce::from_slice(nonce), ciphertext)
+            .decrypt(nonce, ciphertext)
             .map_err(|_| AppError::InvalidSyncCursor)?;
         let decoded: CursorPayload =
             serde_json::from_slice(&plaintext).map_err(|_| AppError::InvalidSyncCursor)?;
