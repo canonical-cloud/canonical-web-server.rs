@@ -5,9 +5,9 @@
 .env.*
 !.env.example
 
-# Built Astro site. NOT committed — the deployment builds it (from
-# canonical-frontend) and hands it to this backend via STATIC_DIR. For local
-# dev, point STATIC_DIR at ../canonical-frontend/dist.
+# Built Astro marketing site. NOT committed — deployment builds it from
+# canonical-marketing-site.web and hands it to this server via STATIC_DIR.
+# For local dev, point STATIC_DIR at ../canonical-marketing-site.web/dist.
 /static
 
 # Scratch / git worktrees (tmp/worktrees/*)

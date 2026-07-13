@@ -1,5 +1,5 @@
 {
-  description = "canonical-backend.rs development environment";
+  description = "canonical-web-server.rs development environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -42,7 +42,7 @@
             ];
 
             shellHook = ''
-              echo "canonical-backend dev shell (${system})"
+              echo "canonical-web-server dev shell (${system})"
             '';
           };
         });

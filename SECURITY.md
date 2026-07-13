@@ -17,3 +17,13 @@ compromised: rotate it first, then scrub history.
 GitHub Actions are pinned to commit SHAs; workflows run with least-privilege
 `permissions: contents: read`. Dependabot tracks the action, package, and crate
 dependencies weekly.
+
+CI pins `cargo-audit` and denies both vulnerabilities and informational
+warnings, with two reviewed exceptions:
+
+- `RUSTSEC-2023-0071`: `rsa` is recorded only through SQLx's disabled optional
+  MySQL support. This server enables PostgreSQL and SQLite; CI separately fails
+  if `rsa` ever appears in the active Cargo dependency graph.
+- `RUSTSEC-2026-0173`: the unmaintained `proc-macro-error2` crate is a
+  compile-time-only transitive dependency of SeaORM's derive macros. Remove the
+  exception when SeaORM replaces it.

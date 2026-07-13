@@ -1,5 +1,8 @@
 target
 static
+client/node_modules
+client/dist
+client/coverage
 .git
 .github
 .nix
