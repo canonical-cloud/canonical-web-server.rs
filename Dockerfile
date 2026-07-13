@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM node:22-bookworm-slim AS client-build
+FROM node:26-bookworm-slim AS client-build
 WORKDIR /build/client
 COPY client/package.json client/package-lock.json ./
 RUN npm ci
