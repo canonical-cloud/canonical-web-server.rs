@@ -341,7 +341,7 @@ dependencies = [
  "futures-util",
  "http-body-util",
  "maud",
- "rand 0.9.5",
+ "rand 0.10.2",
  "reqwest",
  "sea-orm",
  "sea-orm-migration",

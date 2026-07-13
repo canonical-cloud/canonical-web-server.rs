@@ -13,7 +13,7 @@ base64 = "0.22.1"
 chrono = { version = "0.4.42", features = ["serde"] }
 futures-util = "0.3.32"
 maud = { version = "0.27.0", features = ["axum"] }
-rand = "0.9.2"
+rand = "0.10.2"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
 sea-orm = { version = "1.1.20", default-features = false, features = ["macros", "runtime-tokio-rustls", "sqlx-postgres", "sqlx-sqlite", "with-chrono", "with-json", "with-uuid"] }
 sea-orm-migration = { version = "1.1.20", default-features = false, features = ["runtime-tokio-rustls", "sqlx-postgres", "sqlx-sqlite", "with-chrono", "with-json", "with-uuid"] }
