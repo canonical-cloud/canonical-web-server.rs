@@ -1,45 +1,58 @@
-# Agent guidelines — canonical-backend.rs
+# Agent guidelines — canonical-web-server.rs
 
-Rust (axum) HTTP service for **canonical.cloud**. It serves the built Astro
-site from `static/` and exposes a small JSON API under `/api`.
+Rust sMASH application server for **canonical.cloud**: Supabase Auth/Postgres,
+Maud, Axum, SeaORM, HTMX, REST, WebSockets, and an IndexedDB sync client. The
+static marketing site lives in `canonical-marketing-site.web` and is only the
+server's final filesystem fallback.
 
 ## Layout
 
-- `src/main.rs` — the whole service: router, handlers, and unit tests.
-- `static/` — the built Astro site (from `canonical-frontend`'s `dist/`).
-  Not committed; injected at build/deploy time via `STATIC_DIR`.
-- `.nix/flake.nix` — the dev shell (`nix develop`, wired up by `.envrc`).
-
-## Endpoints
-
-- `GET /healthz` — bare `200 OK` liveness probe (bypasses any gateway prefix).
-- `GET /api/health` — `{ "status": "ok", "service": "canonical-backend" }`.
-- `GET /api/info` — service, version, and domain metadata.
-- everything else — served from `STATIC_DIR` (defaults to `static/`), with
-  directory requests resolving to `index.html` and unknown paths falling back
-  to the SPA index.
+- `src/main.rs` — configuration/bootstrap only.
+- `src/auth/` — Supabase and opaque application sessions.
+- `src/db/` — SeaORM entities/migration and user-context transactions.
+- `src/routes/`, `src/views/`, `src/ws/` — HTTP, Maud/HTMX, and WebSockets.
+- `src/sync/` — versioned/idempotent REST sync protocol.
+- `client/` — TypeScript/IndexedDB optimistic client and HTMX bundle.
+- `tests/app.rs` — router, auth, sync, and real WebSocket integration tests.
+- `static/` — uncommitted marketing build selected by `STATIC_DIR`.
 
 ## Working here
 
-- Enter the dev shell with `nix develop ./.nix` (or `direnv allow`, or `./shell`).
-- Format + lint + test before pushing:
-  ```sh
-  cargo fmt
-  cargo clippy --all-targets -- -D warnings
-  cargo test --bins
-  ```
-  `cargo test` runs the in-binary unit tests in `src/main.rs` (this is a
-  bin-only crate, so CI runs `cargo test --bins`).
-- Run locally against the frontend build:
-  ```sh
-  STATIC_DIR=../canonical-frontend/dist PORT=8081 cargo run
-  ```
+```sh
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test --all-targets
+npm test --prefix client
+npm run typecheck --prefix client
+npm run build --prefix client
+```
 
-## Git worktrees
+Run locally with an ignored environment file based on `.env.example`. For
+production, migrate with a privileged database identity and run with a separate
+least-privilege, non-`BYPASSRLS` role.
 
-Create git worktrees under `tmp/worktrees/` (e.g. `tmp/worktrees/<branch>`).
-`tmp/` is gitignored, so worktree checkouts never show up as untracked files or
-get committed by accident.
+## Security invariants
+
+- `/healthz` remains dependency-free; `/readyz` may probe the database.
+- Static marketing fallback is always last. `/api`, `/auth`, and `/app` must
+  retain their own 404 behavior.
+- Never log passwords, cookies, Authorization headers, Supabase tokens, DB
+  URLs, encryption keys, or upstream Auth response bodies.
+- Browser sessions are opaque. Supabase access/refresh tokens remain encrypted
+  server-side, and refresh rotation stays under a row lock.
+- Cookie-authenticated unsafe HTTP requests require both exact Origin and CSRF.
+  Browser WebSockets require exact Origin before upgrade. Never place tokens in
+  WebSocket URLs or subprotocols.
+- Every user-owned repository method derives ownership from verified auth and
+  runs in a user-context transaction. Never accept `owner_id` from a payload.
+- IndexedDB is optimistic, not authoritative. WebSocket messages only wake a
+  REST pull; they never advance the durable cursor.
+- Versions are decimal strings over the wire; server writes use exact CAS.
+  Tombstoned IDs are not resurrected, and mutation IDs are immutable.
+- New sync kinds require bounded validation and explicit authorization; do not
+  turn the protocol into unrestricted arbitrary JSON storage.
+- No secrets in the repository. Use only a Supabase publishable key for normal
+  Auth flows; do not add a service-role/secret key casually.
 
 ## Command safety
 
@@ -50,15 +63,10 @@ Agents working in this repo must **not** run destructive shell commands.
 `git reset --hard` on shared branches, `git push --force` to `main`, and any
 `sudo`-prefixed or disk/format command.
 
-**Whitelisted (prefer these):** `git rm` and `git mv` to delete/move tracked
-files (they stay reviewable and reversible via history), `git restore` /
-`git revert` to undo, and creating files under the gitignored `tmp/` for scratch
-work. When something genuinely must be removed, stage it with `git rm` and let a
-human review the commit — do not delete files out-of-band with `rm`.
+**Whitelisted (prefer these):** `git rm` and `git mv` for tracked removals and
+moves, `git restore` / `git revert` to undo, and files under ignored
+`tmp/worktrees/` for scratch work. Let a human review staged removals.
 
-## Conventions
+## Git worktrees
 
-- Keep the API additive and JSON-shaped; probes must stay dependency-free so a
-  degraded backend still reports liveness.
-- No secrets in the repo. Runtime config comes from the environment
-  (`PORT`, `STATIC_DIR`, `RUST_LOG`).
+Create worktrees only under `tmp/worktrees/<branch>`; `tmp/` is ignored.
