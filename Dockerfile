@@ -7,7 +7,7 @@ RUN npm ci
 COPY client/ ./
 RUN npm run typecheck && npm test && npm run build
 
-FROM rust:1.95-slim-bookworm AS rust-build
+FROM rust:1.97-slim-bookworm AS rust-build
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
