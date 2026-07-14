@@ -168,6 +168,8 @@ CREATE INDEX audit_engagement_owner_status_idx ON public.audit_engagement USING 
 
 CREATE INDEX engagement_note_engagement_created_idx ON public.engagement_note USING btree (engagement_id, created_at);
 
+CREATE INDEX engagement_note_owner_idx ON public.engagement_note USING btree (owner_id);
+
 CREATE INDEX sync_change_owner_cursor_idx ON public.sync_change USING btree (owner_id, cursor);
 
 CREATE INDEX web_session_user_id_idx ON public.web_session USING btree (user_id);
