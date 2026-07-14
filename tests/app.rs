@@ -827,3 +827,235 @@ where
         }
     }
 }
+
+async fn sign_in(app: &Router, email: &str, password: &str) -> String {
+    let login_page = app
+        .clone()
+        .oneshot(Request::get("/login").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let csrf = cookie_value(&login_page, "canonical_login_csrf").unwrap();
+    let login = app
+        .clone()
+        .oneshot(
+            Request::post("/auth/login")
+                .header(header::ORIGIN, "http://localhost:8081")
+                .header(header::COOKIE, format!("canonical_login_csrf={csrf}"))
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!(
+                    "email={}&password={password}&csrf={csrf}",
+                    email.replace('@', "%40")
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::SEE_OTHER);
+    cookie_value(&login, "canonical_session").unwrap()
+}
+
+async fn authed_get(app: &Router, path: &str, session: &str) -> (StatusCode, String) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get(path)
+                .header(header::COOKIE, format!("canonical_session={session}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    (status, body_text(response).await)
+}
+
+async fn authed_post(
+    app: &Router,
+    path: &str,
+    session: &str,
+    body: String,
+    htmx: bool,
+) -> axum::response::Response {
+    let mut request = Request::post(path)
+        .header(header::ORIGIN, "http://localhost:8081")
+        .header(header::COOKIE, format!("canonical_session={session}"))
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+    if htmx {
+        request = request.header("hx-request", "true");
+    }
+    app.clone()
+        .oneshot(request.body(Body::from(body)).unwrap())
+        .await
+        .unwrap()
+}
+
+fn extract_after<'a>(page: &'a str, marker: &str, terminator: char) -> &'a str {
+    let start = page.find(marker).expect("marker present in page") + marker.len();
+    let rest = &page[start..];
+    let end = rest.find(terminator).expect("terminator present");
+    &rest[..end]
+}
+
+fn page_csrf(page: &str) -> String {
+    extract_after(page, "name=\"csrf\" value=\"", '"').to_string()
+}
+
+fn first_engagement_id(page: &str) -> String {
+    extract_after(page, "href=\"/app/engagements/", '"').to_string()
+}
+
+#[tokio::test]
+async fn engagement_pages_require_a_session() {
+    let app = app().await;
+    let response = app
+        .oneshot(
+            Request::get("/app/engagements")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[header::LOCATION], "/login");
+}
+
+#[tokio::test]
+async fn engagement_lifecycle_create_list_detail_status_note() {
+    let app = app().await;
+    let session = sign_in(&app, "user@example.com", "secret").await;
+
+    let (status, page) = authed_get(&app, "/app/engagements", &session).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("No engagements yet"));
+    let csrf = page_csrf(&page);
+
+    let create = authed_post(
+        &app,
+        "/app/engagements",
+        &session,
+        format!("csrf={csrf}&company=Acme%20Corp&framework=soc2&target_report_date=2026-12-31"),
+        false,
+    )
+    .await;
+    assert_eq!(create.status(), StatusCode::SEE_OTHER);
+    assert_eq!(create.headers()[header::LOCATION], "/app/engagements");
+
+    let (_, page) = authed_get(&app, "/app/engagements", &session).await;
+    assert!(page.contains("Acme Corp"));
+    assert!(page.contains("SOC 2"));
+    assert!(page.contains("report due 2026-12-31"));
+    let id = first_engagement_id(&page);
+
+    let (status, detail) = authed_get(&app, &format!("/app/engagements/{id}"), &session).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(detail.contains("Status: Scoping"));
+    assert!(detail.contains("No notes yet."));
+
+    let update = authed_post(
+        &app,
+        &format!("/app/engagements/{id}/status"),
+        &session,
+        format!("csrf={csrf}&status=in_audit"),
+        true,
+    )
+    .await;
+    assert_eq!(update.status(), StatusCode::OK);
+    let fragment = body_text(update).await;
+    assert!(fragment.contains("Status: In audit"));
+
+    let note = authed_post(
+        &app,
+        &format!("/app/engagements/{id}/notes"),
+        &session,
+        format!("csrf={csrf}&body=Kickoff%20call%20scheduled"),
+        false,
+    )
+    .await;
+    assert_eq!(note.status(), StatusCode::SEE_OTHER);
+
+    let (_, detail) = authed_get(&app, &format!("/app/engagements/{id}"), &session).await;
+    assert!(detail.contains("Kickoff call scheduled"));
+    assert!(detail.contains("Status: In audit"));
+}
+
+#[tokio::test]
+async fn invalid_engagement_input_is_rejected_with_a_targeted_fragment() {
+    let app = app().await;
+    let session = sign_in(&app, "user@example.com", "secret").await;
+    let (_, page) = authed_get(&app, "/app/engagements", &session).await;
+    let csrf = page_csrf(&page);
+
+    let bad_framework = authed_post(
+        &app,
+        "/app/engagements",
+        &session,
+        format!("csrf={csrf}&company=Acme&framework=warp9"),
+        true,
+    )
+    .await;
+    assert_eq!(bad_framework.status(), StatusCode::OK);
+    assert_eq!(
+        bad_framework.headers()["hx-retarget"],
+        "#engagement-form-error"
+    );
+    assert!(body_text(bad_framework)
+        .await
+        .contains("supported compliance framework"));
+
+    let oversize_company = "a".repeat(201);
+    let too_long = authed_post(
+        &app,
+        "/app/engagements",
+        &session,
+        format!("csrf={csrf}&company={oversize_company}&framework=soc2"),
+        true,
+    )
+    .await;
+    assert_eq!(too_long.status(), StatusCode::OK);
+    assert_eq!(too_long.headers()["hx-retarget"], "#engagement-form-error");
+
+    let (_, page) = authed_get(&app, "/app/engagements", &session).await;
+    assert!(page.contains("No engagements yet"));
+}
+
+#[tokio::test]
+async fn engagements_are_owner_scoped() {
+    let app = app().await;
+    let session_a = sign_in(&app, "user@example.com", "secret").await;
+    let (_, page) = authed_get(&app, "/app/engagements", &session_a).await;
+    let csrf_a = page_csrf(&page);
+    let create = authed_post(
+        &app,
+        "/app/engagements",
+        &session_a,
+        format!("csrf={csrf_a}&company=Secret%20Client&framework=hipaa"),
+        false,
+    )
+    .await;
+    assert_eq!(create.status(), StatusCode::SEE_OTHER);
+    let (_, page) = authed_get(&app, "/app/engagements", &session_a).await;
+    let id = first_engagement_id(&page);
+
+    let session_b = sign_in(&app, "other@example.com", "secret").await;
+    let (status, page_b) = authed_get(&app, "/app/engagements", &session_b).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page_b.contains("No engagements yet"));
+    assert!(!page_b.contains("Secret Client"));
+
+    let (status, _) = authed_get(&app, &format!("/app/engagements/{id}"), &session_b).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let csrf_b = page_csrf(&page_b);
+    let foreign_update = authed_post(
+        &app,
+        &format!("/app/engagements/{id}/status"),
+        &session_b,
+        format!("csrf={csrf_b}&status=complete"),
+        true,
+    )
+    .await;
+    assert_eq!(foreign_update.status(), StatusCode::NOT_FOUND);
+
+    let (_, detail_a) = authed_get(&app, &format!("/app/engagements/{id}"), &session_a).await;
+    assert!(detail_a.contains("Status: Scoping"));
+}
