@@ -322,8 +322,11 @@ impl MigrationTrait for AddEngagements {
                     .col(
                         // The enum values are also enforced in the handlers so
                         // SQLite deployments get the same protection.
+                        // text (not varchar): text-column check constraints
+                        // round-trip Postgres deparsing byte-stably, which the
+                        // dpm declarative-schema gate depends on.
                         ColumnDef::new(AuditEngagement::Framework)
-                            .string()
+                            .text()
                             .not_null()
                             .check(Expr::col(AuditEngagement::Framework).is_in([
                                 "soc2",
@@ -336,7 +339,7 @@ impl MigrationTrait for AddEngagements {
                     )
                     .col(
                         ColumnDef::new(AuditEngagement::Status)
-                            .string()
+                            .text()
                             .not_null()
                             .check(Expr::col(AuditEngagement::Status).is_in([
                                 "scoping",
