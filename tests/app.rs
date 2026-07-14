@@ -46,17 +46,18 @@ impl AuthProvider for FakeAuth {
         email: &str,
         password: &str,
     ) -> Result<AuthTokens, AuthProviderError> {
-        if email != "user@example.com" || password != "secret" {
-            return Err(AuthProviderError::InvalidCredentials);
+        match (email, password) {
+            ("user@example.com", "secret") => Ok(tokens()),
+            ("other@example.com", "secret") => Ok(other_tokens()),
+            _ => Err(AuthProviderError::InvalidCredentials),
         }
-        Ok(tokens())
     }
 
     async fn refresh(&self, refresh_token: &str) -> Result<AuthTokens, AuthProviderError> {
-        if refresh_token == "refresh-token" {
-            Ok(tokens())
-        } else {
-            Err(AuthProviderError::InvalidCredentials)
+        match refresh_token {
+            "refresh-token" => Ok(tokens()),
+            "refresh-token-b" => Ok(other_tokens()),
+            _ => Err(AuthProviderError::InvalidCredentials),
         }
     }
 
