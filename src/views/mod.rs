@@ -1,4 +1,5 @@
 use crate::auth::AuthContext;
+use crate::db::entity::{audit_engagement, engagement_note};
 use maud::{html, Markup, DOCTYPE};
 
 fn layout(title: &str, body: Markup, csrf: Option<&str>, account_key: Option<&str>) -> Markup {
