@@ -129,6 +129,22 @@ fn tokens() -> AuthTokens {
     }
 }
 
+fn other_user() -> SupabaseUser {
+    SupabaseUser {
+        id: OTHER_USER_ID,
+        email: Some("other@example.com".into()),
+    }
+}
+
+fn other_tokens() -> AuthTokens {
+    AuthTokens {
+        access_token: "access-token-b".into(),
+        refresh_token: "refresh-token-b".into(),
+        expires_at: Utc::now() + ChronoDuration::hours(1),
+        user: other_user(),
+    }
+}
+
 async fn expired_session(
     failure: RefreshFailure,
 ) -> (
