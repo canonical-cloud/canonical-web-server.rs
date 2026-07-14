@@ -12,7 +12,9 @@ use axum::{
     Form, Router,
 };
 use chrono::{NaiveDate, Utc};
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -62,8 +64,7 @@ async fn not_found() -> Response {
 /// page-level error instead.
 fn form_error(headers: &HeaderMap, slot: &'static str, message: &str) -> Response {
     if headers.contains_key("hx-request") {
-        let mut response =
-            (StatusCode::OK, views::engagement_form_error(message)).into_response();
+        let mut response = (StatusCode::OK, views::engagement_form_error(message)).into_response();
         response
             .headers_mut()
             .insert("hx-retarget", HeaderValue::from_static(slot));

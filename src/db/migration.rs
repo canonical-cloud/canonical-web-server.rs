@@ -390,7 +390,11 @@ impl MigrationTrait for AddEngagements {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(EngagementNote::EngagementId).uuid().not_null())
+                    .col(
+                        ColumnDef::new(EngagementNote::EngagementId)
+                            .uuid()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(EngagementNote::OwnerId).uuid().not_null())
                     .col(ColumnDef::new(EngagementNote::Body).string().not_null())
                     .col(
@@ -415,6 +419,16 @@ impl MigrationTrait for AddEngagements {
                     .table(EngagementNote::Table)
                     .col(EngagementNote::EngagementId)
                     .col(EngagementNote::CreatedAt)
+                    .to_owned(),
+            )
+            .await?;
+        // Supports the owner FK (auth.users cascade deletes) and owner scans.
+        manager
+            .create_index(
+                Index::create()
+                    .name("engagement_note_owner_idx")
+                    .table(EngagementNote::Table)
+                    .col(EngagementNote::OwnerId)
                     .to_owned(),
             )
             .await?;
