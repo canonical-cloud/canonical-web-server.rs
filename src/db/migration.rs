@@ -322,8 +322,11 @@ impl MigrationTrait for AddEngagements {
                     .col(
                         // The enum values are also enforced in the handlers so
                         // SQLite deployments get the same protection.
+                        // text (not varchar): text-column check constraints
+                        // round-trip Postgres deparsing byte-stably, which the
+                        // dpm declarative-schema gate depends on.
                         ColumnDef::new(AuditEngagement::Framework)
-                            .string()
+                            .text()
                             .not_null()
                             .check(Expr::col(AuditEngagement::Framework).is_in([
                                 "soc2",
@@ -336,7 +339,7 @@ impl MigrationTrait for AddEngagements {
                     )
                     .col(
                         ColumnDef::new(AuditEngagement::Status)
-                            .string()
+                            .text()
                             .not_null()
                             .check(Expr::col(AuditEngagement::Status).is_in([
                                 "scoping",
@@ -419,6 +422,16 @@ impl MigrationTrait for AddEngagements {
                     .table(EngagementNote::Table)
                     .col(EngagementNote::EngagementId)
                     .col(EngagementNote::CreatedAt)
+                    .to_owned(),
+            )
+            .await?;
+        // Supports the owner FK (auth.users cascade deletes) and owner scans.
+        manager
+            .create_index(
+                Index::create()
+                    .name("engagement_note_owner_idx")
+                    .table(EngagementNote::Table)
+                    .col(EngagementNote::OwnerId)
                     .to_owned(),
             )
             .await?;
