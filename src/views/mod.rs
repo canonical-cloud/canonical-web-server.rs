@@ -25,7 +25,11 @@ fn layout(title: &str, body: Markup, csrf: Option<&str>, account_key: Option<&st
             body {
                 nav {
                     a href="/" { strong { "canonical.cloud" } }
-                    a href="/app" { "Application" }
+                    span {
+                        a href="/app" { "Application" }
+                        " · "
+                        a href="/app/engagements" { "Engagements" }
+                    }
                 }
                 (body)
             }
