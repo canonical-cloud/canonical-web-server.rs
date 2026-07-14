@@ -35,6 +35,7 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 const USER_ID: Uuid = Uuid::from_u128(0x8c1f269a_2d15_4b56_8e38_e68db51f979f);
+const OTHER_USER_ID: Uuid = Uuid::from_u128(0x2f9a41c3_7be0_4d12_9c55_10afdd42be71);
 
 #[derive(Clone)]
 struct FakeAuth;
