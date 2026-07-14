@@ -293,8 +293,15 @@ impl MigrationTrait for Migration {
     }
 }
 
-#[derive(DeriveMigrationName)]
 struct AddEngagements;
+
+// DeriveMigrationName would reuse this module's name, colliding with the
+// initial migration's version key; name this one explicitly.
+impl MigrationName for AddEngagements {
+    fn name(&self) -> &str {
+        "m20260713_000001_add_engagements"
+    }
+}
 
 #[async_trait::async_trait]
 impl MigrationTrait for AddEngagements {
