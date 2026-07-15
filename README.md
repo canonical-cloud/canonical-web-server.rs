@@ -128,6 +128,14 @@ Destructive changes require dpm's two explicit consent flags and stay
 commented out otherwise; grants are out of dpm's scope and stay in
 `bootstrap_runtime_role.sql`.
 
+The migrations are also proven against **CockroachDB** (v25.2+, which speaks
+the Postgres wire protocol and supports forced RLS): the `cockroach-rls` CI
+job applies the full chain to a single-node cluster and asserts the same
+owner-isolation contract. Two documented divergences: CockroachDB validates
+foreign keys with the inserting role's privileges (grant the app role SELECT
+on `auth.users`), and it has no LISTEN/NOTIFY, so the WebSocket invalidation
+backplane is Postgres-only — REST pull remains authoritative either way.
+
 The bootstrap creates `canonical_web_server` as a non-owner,
 non-`BYPASSRLS` login without a password and grants only the application's
 current tables. Set its password or another authentication mechanism through
