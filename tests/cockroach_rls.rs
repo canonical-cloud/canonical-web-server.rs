@@ -18,7 +18,7 @@
 //! DISPOSABLE loopback single-node cluster.
 
 use canonical_web_server::{db::begin_user_transaction, run_migrations};
-use sea_orm::{ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, Statement};
+use sea_orm::{ConnectionTrait, Database, DatabaseBackend, Statement};
 use std::{env, error::Error, io};
 use uuid::Uuid;
 
