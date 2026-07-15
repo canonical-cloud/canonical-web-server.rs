@@ -188,6 +188,44 @@ jobs:
           --target postgresql://postgres:postgres@127.0.0.1:5432/postgres
           --shadow postgresql://postgres:postgres@127.0.0.1:5432/postgres
 
+  # The same migrations + owner RLS contract must hold on CockroachDB (v25.2+
+  # has forced RLS and policies over the Postgres wire protocol). Service
+  # containers cannot pass a command, so the single-node cluster starts via
+  # docker run. See tests/cockroach_rls.rs for the two documented divergences
+  # (FK-check privileges, no LISTEN/NOTIFY backplane).
+  cockroach-rls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: "1.95.0"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: cockroach-rls
+      - name: Start single-node CockroachDB
+        shell: bash
+        run: |
+          docker run --detach --name crdb --publish 26257:26257 \
+            cockroachdb/cockroach:v25.2.4 start-single-node --insecure
+          for attempt in {1..60}; do
+            if docker exec crdb cockroach sql --insecure -e "SELECT 1" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs crdb
+          exit 1
+      - name: CockroachDB migration and RLS integration test
+        env:
+          TEST_COCKROACH_ADMIN_URL: postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disable
+        run: cargo test --test cockroach_rls -- --nocapture
+
   container-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 25
