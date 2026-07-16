@@ -213,5 +213,3 @@ CREATE POLICY sync_record_owner ON public.sync_record USING ((owner_id = auth.ui
 ALTER TABLE public.user_profile ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY user_profile_owner ON public.user_profile USING ((user_id = auth.uid())) WITH CHECK ((user_id = auth.uid()));
-
-
