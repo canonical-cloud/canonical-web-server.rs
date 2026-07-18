@@ -1,11 +1,12 @@
 pub mod auth;
-pub mod config;
-pub mod db;
 pub mod error;
 pub mod routes;
 pub mod sync;
 pub mod views;
 pub mod ws;
+
+pub use canonical_config as config;
+pub use canonical_store as db;
 
 use axum::{
     http::{header, HeaderName, HeaderValue},
@@ -14,9 +15,10 @@ use axum::{
 use config::Config;
 use db::migration::Migrator;
 use error::AppError;
-use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseBackend};
+use sea_orm::{ConnectionTrait, DatabaseBackend};
 use sea_orm_migration::MigratorTrait;
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::Arc};
+use tokio::sync::Semaphore;
 use tower_http::{
     compression::CompressionLayer,
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
@@ -33,8 +35,10 @@ pub struct AppState {
     pub db: sea_orm::DatabaseConnection,
     pub auth: Arc<dyn auth::AuthProvider>,
     pub login_rate_limiter: auth::LoginRateLimiter,
+    pub(crate) login_auth_semaphore: Arc<Semaphore>,
     pub sessions: auth::SessionService,
     pub hub: ws::Hub,
+    pub(crate) bearer_auth_semaphore: Arc<Semaphore>,
 }
 
 impl AppState {
@@ -52,23 +56,31 @@ impl AppState {
         )?;
         let login_rate_limiter = auth::LoginRateLimiter::new(
             config.login_rate_limit_attempts,
+            config.login_rate_limit_global_attempts,
             config.login_rate_limit_window,
             config.login_rate_limit_max_keys,
         );
+        let login_auth_semaphore = Arc::new(Semaphore::new(config.login_auth_max_concurrency));
+        let bearer_auth_semaphore = Arc::new(Semaphore::new(config.bearer_auth_max_concurrency));
 
         Ok(Self {
             config,
             db,
             auth,
             login_rate_limiter,
+            login_auth_semaphore,
             sessions,
             hub: ws::Hub::new(256),
+            bearer_auth_semaphore,
         })
     }
 }
 
 pub async fn build_state(config: Config) -> Result<AppState, AppError> {
-    let db = connect_database(&config.database_url, config.database_max_connections).await?;
+    let db = db::connect_database(&config.database_url, config.database_max_connections).await?;
+    // Check the exact least-privilege identity before any optional migration or
+    // request-serving work. An owner/superuser URL must never limp into service.
+    db::verify_runtime_database_role(&db).await?;
     if config.auto_migrate {
         Migrator::up(&db, None).await?;
     }
@@ -80,22 +92,6 @@ pub async fn build_state(config: Config) -> Result<AppState, AppError> {
     AppState::new(config, db, auth)
 }
 
-async fn connect_database(
-    database_url: &str,
-    database_max_connections: u32,
-) -> Result<sea_orm::DatabaseConnection, sea_orm::DbErr> {
-    let mut options = ConnectOptions::new(database_url);
-    options
-        .max_connections(database_max_connections)
-        .min_connections(1)
-        .connect_timeout(Duration::from_secs(10))
-        .acquire_timeout(Duration::from_secs(10))
-        .idle_timeout(Duration::from_secs(300))
-        .sqlx_logging(false);
-
-    Database::connect(options).await
-}
-
 /// Applies all database migrations and exits without constructing the HTTP or
 /// Supabase clients. Deploy this with a privileged URL that is never supplied
 /// to the long-lived web process.
@@ -103,7 +99,7 @@ pub async fn run_migrations(
     database_url: &str,
     database_max_connections: u32,
 ) -> Result<(), AppError> {
-    let db = connect_database(database_url, database_max_connections).await?;
+    let db = db::connect_database(database_url, database_max_connections).await?;
     Migrator::up(&db, None).await?;
     db.close().await?;
     Ok(())
@@ -161,7 +157,6 @@ pub async fn run(config: Config) -> Result<(), AppError> {
     } else {
         None
     };
-    let _revocation_worker = state.sessions.spawn_revocation_worker();
     let app = build_app(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;

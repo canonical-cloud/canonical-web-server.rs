@@ -329,6 +329,76 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "canonical-auth"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64",
+ "chrono",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "canonical-config"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "reqwest",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "canonical-session"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "async-trait",
+ "base64",
+ "canonical-auth",
+ "canonical-store",
+ "chrono",
+ "rand 0.10.2",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "canonical-session-revoker"
+version = "0.1.0"
+dependencies = [
+ "canonical-auth",
+ "canonical-config",
+ "canonical-session",
+ "canonical-store",
+ "sea-orm",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "canonical-store"
+version = "0.1.0"
+dependencies = [
+ "sea-orm",
+ "sea-orm-migration",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "canonical-web-server"
 version = "0.1.0"
 dependencies = [
@@ -337,6 +407,10 @@ dependencies = [
  "axum",
  "axum-extra",
  "base64",
+ "canonical-auth",
+ "canonical-config",
+ "canonical-session",
+ "canonical-store",
  "chrono",
  "futures-util",
  "http-body-util",
