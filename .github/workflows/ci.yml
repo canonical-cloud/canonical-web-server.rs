@@ -290,18 +290,26 @@ jobs:
         shell: bash
         run: |
           trap 'docker stop canonical-web-server-ci >/dev/null 2>&1 || true' EXIT
+          database_dir="$(mktemp -d)"
+          chmod 0777 "$database_dir"
+          docker run --rm \
+            --read-only \
+            --mount "type=bind,source=$database_dir,target=/data" \
+            --env MIGRATION_DATABASE_URL='sqlite:///data/canonical.db?mode=rwc' \
+            --env MIGRATION_DATABASE_MAX_CONNECTIONS=1 \
+            canonical-web-server:ci migrate
           docker run --detach \
             --name canonical-web-server-ci \
             --read-only \
+            --mount "type=bind,source=$database_dir,target=/data" \
             --publish 18081:8081 \
             --env PORT=8081 \
             --env APP_BASE_URL=http://127.0.0.1:8081 \
             --env APP_ALLOWED_ORIGINS=http://127.0.0.1:8081 \
             --env APP_SESSION_ENCRYPTION_KEY=AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE= \
             --env COOKIE_SECURE=false \
-            --env DATABASE_URL=sqlite::memory: \
+            --env DATABASE_URL='sqlite:///data/canonical.db?mode=rwc' \
             --env DATABASE_MAX_CONNECTIONS=1 \
-            --env AUTO_MIGRATE=true \
             --env SUPABASE_URL=http://127.0.0.1:54321 \
             --env SUPABASE_PUBLISHABLE_KEY=sb_publishable_ci_only \
             canonical-web-server:ci

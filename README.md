@@ -31,6 +31,14 @@ credentials or the server's Supabase token pair.
   and exact user/admin/revoker transaction boundaries.
 - `src/auth/` — Axum extractors, CSRF/Origin checks, and bounded login
   throttling. It adapts the lower-level auth/session crates to HTTP.
+- `src/main.rs` / `src/command.rs` — minimal process bootstrap and explicit
+  `serve` / `migrate` command dispatch.
+- `src/app.rs` / `src/server.rs` — application state, router assembly, network
+  listener, PostgreSQL backplane lifecycle, and graceful shutdown.
+- `src/database.rs` — SeaORM connection policy and the explicit migration
+  entry point; application modules do not construct pools themselves.
+- `src/telemetry.rs` — JSON stdout logs for Promtail/Loki plus explicit OTLP
+  HTTP spans and low-cardinality metrics for the collector/Prometheus.
 - `src/routes/` — probes, Maud/HTMX pages, versioned REST, and authenticated
   WebSocket upgrade handling.
 - `src/sync/` — compare-and-swap mutations, durable idempotency, tombstones,
@@ -225,8 +233,8 @@ process's reviewed object surface. Set its password or another authentication me
 the deployment secret manager, never in this repository, then use that role in
 `DATABASE_URL`. Startup rechecks the exact login, unsafe attributes,
 memberships, and application-object ownership. Re-run the bootstrap after
-future migrations change an allow-list. Keep `AUTO_MIGRATE=false` in
-production so the long-lived process never needs owner credentials.
+future migrations change an allow-list. The long-lived `serve` process has no
+automatic migration path and therefore never needs owner credentials.
 
 Copy `.env.example` to an ignored local environment file and replace every
 placeholder. `APP_SESSION_ENCRYPTION_KEY` must be standard-base64 for exactly
@@ -238,14 +246,14 @@ placeholder. `APP_SESSION_ENCRYPTION_KEY` must be standard-base64 for exactly
 direnv allow                       # or: nix develop ./.nix / ./shell
 npm ci --prefix client
 npm run build --prefix client
-DATABASE_URL=sqlite:tmp/canonical-dev.db?mode=rwc \
-  AUTO_MIGRATE=true cargo run --bin canonical-web-server
+cargo run -- migrate               # local/fresh database only
+cargo run -- serve
 ```
 
-`AUTO_MIGRATE=true` is for SQLite development/tests only. PostgreSQL startup
-requires the exact non-DDL `canonical_web_server` role, so apply migrations
-first with `canonical-web-server migrate` and `MIGRATION_DATABASE_URL`, run the
-runtime/revoker bootstrap scripts, then serve with `AUTO_MIGRATE=false`.
+PostgreSQL startup requires the exact non-DDL `canonical_web_server` role, so
+apply migrations first with `canonical-web-server migrate` and
+`MIGRATION_DATABASE_URL`, run the runtime/revoker bootstrap scripts, then
+serve with the runtime URL.
 
 For the full local stack, build the sibling marketing site and set:
 
@@ -255,6 +263,20 @@ STATIC_DIR=../canonical-marketing-site.web/dist
 
 SQLite is compiled in for focused local/integration tests. Production should
 use Supabase Postgres with TLS.
+
+## Observability
+
+The server always writes compact JSON logs to stdout, which Kubernetes exposes
+as CRI logs for Promtail and Loki. Set `RUST_LOG` to tune filtering; credentials,
+cookies, bearer tokens, request bodies, and database URLs are never span fields.
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` to an OTLP/gRPC collector endpoint (port 4317
+in the target cluster) to enable batched traces and metrics. Every HTTP request
+gets a W3C-parent-aware server span with route, method, request ID, response
+status, trace ID, and span ID. The service exports request count and duration
+with only bounded status attributes; the cluster collector publishes those
+metrics on its Prometheus exporter. If OTLP is not configured or exporter setup
+fails, the service continues with stdout logging.
 
 ## Verify
 

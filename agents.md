@@ -17,9 +17,13 @@ server's final filesystem fallback.
   user/admin/revoker transaction boundaries.
 - `services/canonical-session-revoker/` — no-ingress worker. It must not
   depend on `canonical-web-server`, Axum, Maud, routes, or WebSockets.
-- `src/main.rs` — customer web process configuration/bootstrap only.
+- `src/main.rs` / `src/command.rs` — telemetry/bootstrap and explicit
+  `serve` / `migrate` command dispatch only.
 - `src/auth/` — Axum authentication extractors, CSRF/Origin checks, and
   bounded login throttling.
+- `src/app.rs`, `src/server.rs` — state/router assembly and network lifecycle.
+- `src/database.rs` — SeaORM pool policy and the explicit migration command.
+- `src/telemetry.rs` — stdout JSON logs plus OTLP HTTP traces/metrics.
 - `src/routes/`, `src/views/`, `src/ws/` — HTTP, Maud/HTMX, and WebSockets.
 - `src/sync/` — versioned/idempotent REST sync protocol.
 - `client/` — TypeScript/IndexedDB optimistic client and HTMX bundle.
