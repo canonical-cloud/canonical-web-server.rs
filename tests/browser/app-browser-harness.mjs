@@ -168,30 +168,36 @@ export async function startServer() {
       APP_ASSET_DIR: join(REPO_ROOT, "client", "dist"),
     },
   });
+  const exited = new Promise((resolve) => child.once("exit", resolve));
   child.unref();
 
-  const stop = () => {
+  const stop = async () => {
+    if (child.pid !== undefined && child.exitCode === null) {
+      try {
+        process.kill(-child.pid, "SIGTERM");
+      } catch {
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          // already gone
+        }
+      }
+      await Promise.race([
+        exited,
+        new Promise((resolve) => setTimeout(resolve, 5000)),
+      ]);
+    }
     try {
       rmSync(staticDir, { recursive: true, force: true });
     } catch {
       // best effort
-    }
-    if (child.pid === undefined) return;
-    try {
-      process.kill(-child.pid, "SIGTERM");
-    } catch {
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        // already gone
-      }
     }
   };
 
   try {
     await waitForReady(`${url}/healthz`, 60000);
   } catch (error) {
-    stop();
+    await stop();
     throw error;
   }
 
