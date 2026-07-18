@@ -17,6 +17,7 @@ pub async fn run(config: Config) -> Result<(), AppError> {
     } else {
         None
     };
+    let _revocation_worker = state.sessions.spawn_revocation_worker();
     let app = app::build_app(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
