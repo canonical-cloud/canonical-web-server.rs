@@ -11,7 +11,7 @@ canonical-auth = { path = "../canonical-auth" }
 canonical-store = { path = "../canonical-store" }
 chrono = { version = "0.4.42", features = ["serde"] }
 rand = "0.10.2"
-sea-orm = { version = "1.1.20", default-features = false, features = ["macros", "runtime-tokio-rustls", "sqlx-postgres", "sqlx-sqlite", "with-chrono", "with-json", "with-uuid"] }
+sea-orm = { version = "2.0.0", default-features = false, features = ["macros", "runtime-tokio-rustls", "sqlx-postgres", "sqlx-sqlite", "with-chrono", "with-json", "with-uuid"] }
 serde_json = "1.0.150"
 sha2 = "0.11.0"
 thiserror = "2.0.18"
