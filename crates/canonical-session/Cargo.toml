@@ -6,7 +6,7 @@ rust-version = "1.88"
 
 [dependencies]
 aes-gcm = "0.11.0"
-base64 = "0.22.1"
+base64 = "0.23.0"
 canonical-auth = { path = "../canonical-auth" }
 canonical-store = { path = "../canonical-store" }
 chrono = { version = "0.4.42", features = ["serde"] }

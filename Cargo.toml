@@ -25,7 +25,7 @@ aes-gcm = "0.11.0"
 async-trait = "0.1.89"
 axum = { version = "0.8.9", features = ["macros", "ws"] }
 axum-extra = { version = "0.12.6", features = ["cookie"] }
-base64 = "0.22.1"
+base64 = "0.23.0"
 canonical-auth = { path = "crates/canonical-auth" }
 canonical-config = { path = "crates/canonical-config" }
 canonical-session = { path = "crates/canonical-session" }
