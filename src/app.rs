@@ -19,7 +19,7 @@ use crate::{
     config::Config,
     database,
     error::AppError,
-    routes, telemetry, ws,
+    metrics, routes, telemetry, ws,
 };
 
 #[derive(Clone)]
@@ -84,7 +84,8 @@ pub async fn build_state(config: Config) -> Result<AppState, AppError> {
 
 pub fn build_app(state: AppState) -> Router {
     let request_id_header = HeaderName::from_static("x-request-id");
-    let app = telemetry::instrument_http(routes::router(state));
+    let app = telemetry::instrument_http(routes::router(state))
+        .layer(axum::middleware::from_fn(metrics::record_http));
 
     app.layer((
         SetSensitiveRequestHeadersLayer::new([header::AUTHORIZATION, header::COOKIE]),
