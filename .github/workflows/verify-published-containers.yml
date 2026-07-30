@@ -1,0 +1,69 @@
+name: verify published containers
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/verify-published-containers.yml
+      - release/current-containers.env
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/verify-published-containers.yml
+      - release/current-containers.env
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  manifests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out release declaration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Validate release declaration
+        shell: bash
+        run: |
+          set -euo pipefail
+          source release/current-containers.env
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$WEB_IMAGE" = "ghcr.io/canonical-cloud/canonical-web-server:${SOURCE_SHA}"
+          test "$REVOKER_IMAGE" = "ghcr.io/canonical-cloud/canonical-session-revoker:${SOURCE_SHA}"
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+
+      - name: Authenticate for package reads
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Require both immutable manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          source release/current-containers.env
+          docker manifest inspect "$WEB_IMAGE" >/tmp/web-manifest.json
+          docker manifest inspect "$REVOKER_IMAGE" >/tmp/revoker-manifest.json
+          test -s /tmp/web-manifest.json
+          test -s /tmp/revoker-manifest.json
+          {
+            echo '## Verified immutable Canonical Cloud release'
+            echo
+            echo "- Source: \`${SOURCE_SHA}\`"
+            echo "- Web: \`${WEB_IMAGE}\`"
+            echo "- Revoker: \`${REVOKER_IMAGE}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove registry credentials
+        if: always()
+        run: docker logout ghcr.io || true
