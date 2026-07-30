@@ -3,6 +3,7 @@ pub mod auth;
 pub mod command;
 pub mod database;
 pub mod error;
+pub mod metrics;
 pub mod routes;
 pub mod server;
 pub mod sync;
