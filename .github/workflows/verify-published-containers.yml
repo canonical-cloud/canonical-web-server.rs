@@ -23,7 +23,7 @@ concurrency:
 jobs:
   manifests:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Check out release declaration and source history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -48,15 +48,21 @@ jobs:
           set -euo pipefail
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
 
-      - name: Require both immutable manifests
+      - name: Pull and inspect both immutable images
         shell: bash
         run: |
           set -euo pipefail
           source release/current-containers.env
-          docker manifest inspect "$WEB_IMAGE" >/tmp/web-manifest.json
-          docker manifest inspect "$REVOKER_IMAGE" >/tmp/revoker-manifest.json
-          test -s /tmp/web-manifest.json
-          test -s /tmp/revoker-manifest.json
+          docker pull --quiet "$WEB_IMAGE"
+          docker pull --quiet "$REVOKER_IMAGE"
+
+          test "$(docker image inspect "$WEB_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$SOURCE_SHA"
+          test "$(docker image inspect "$REVOKER_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$SOURCE_SHA"
+          test "$(docker image inspect "$WEB_IMAGE" --format '{{.Config.User}}')" = '65532:65532'
+          test "$(docker image inspect "$REVOKER_IMAGE" --format '{{.Config.User}}')" = '65532:65532'
+          test "$(docker image inspect "$WEB_IMAGE" --format '{{json .Config.Entrypoint}}')" = '["/usr/local/bin/canonical-web-server"]'
+          test "$(docker image inspect "$REVOKER_IMAGE" --format '{{json .Config.Entrypoint}}')" = '["/usr/local/bin/canonical-session-revoker"]'
+
           {
             echo '## Verified immutable Canonical Cloud release'
             echo
