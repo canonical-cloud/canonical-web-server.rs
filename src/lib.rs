@@ -1,3 +1,6 @@
+#[cfg(all(feature = "test-auth", not(debug_assertions)))]
+compile_error!("the test-auth feature is forbidden in release builds");
+
 pub mod app;
 pub mod auth;
 pub mod command;

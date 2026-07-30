@@ -31,6 +31,8 @@ jobs:
         with:
           node-version: "22"
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Application repository release boundary
+        run: node tests/release-boundary.mjs
       - name: client dependencies
         run: npm ci --prefix client
       - name: client tests
@@ -45,6 +47,23 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: test
         run: cargo test --workspace --all-targets --locked
+      - name: Test authentication is forbidden in release builds
+        shell: bash
+        run: |
+          set +e
+          output="$(cargo check --locked --release --features test-auth \
+            -p canonical-web-server --lib 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          if [ "$status" -eq 0 ]; then
+            echo "test-auth unexpectedly compiled in the release profile" >&2
+            exit 1
+          fi
+          if ! grep -Fq "the test-auth feature is forbidden in release builds" <<<"$output"; then
+            echo "release build failed for an unexpected reason" >&2
+            exit 1
+          fi
       - name: Revoker dependency boundary
         shell: bash
         run: |
@@ -220,7 +239,7 @@ jobs:
         run: |
           docker run --detach --name crdb --publish 26257:26257 \
             cockroachdb/cockroach:v25.2.4 start-single-node --insecure
-          for attempt in {1..60}; do
+          for _ in {1..60}; do
             if docker exec crdb cockroach sql --insecure -e "SELECT 1" >/dev/null 2>&1; then
               exit 0
             fi
@@ -259,7 +278,7 @@ jobs:
         with:
           key: browser-e2e
       - name: Build server binary
-        run: cargo build --locked --bin canonical-web-server
+        run: cargo build --locked --features test-auth --bin canonical-web-server
       - name: Build client bundle
         run: |
           npm ci --prefix client
