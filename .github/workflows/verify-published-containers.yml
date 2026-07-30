@@ -3,27 +3,28 @@ name: verify published containers
 on:
   pull_request:
     paths:
+      - .github/workflows/publish-containers.yml
       - .github/workflows/verify-published-containers.yml
       - release/current-containers.env
   push:
     branches: [main]
     paths:
+      - .github/workflows/publish-containers.yml
       - .github/workflows/verify-published-containers.yml
       - release/current-containers.env
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  manifests:
+  declaration:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - name: Check out release declaration and source history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -41,36 +42,26 @@ jobs:
           test "$REVOKER_IMAGE" = "ghcr.io/canonical-cloud/canonical-session-revoker:${SOURCE_SHA}"
           git cat-file -e "${SOURCE_SHA}^{commit}"
 
-      - name: Authenticate for package reads
-        env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
-
-      - name: Pull and inspect both immutable images
+      - name: Validate publisher proof contract
         shell: bash
         run: |
           set -euo pipefail
-          source release/current-containers.env
-          docker pull --quiet "$WEB_IMAGE"
-          docker pull --quiet "$REVOKER_IMAGE"
+          workflow=.github/workflows/publish-containers.yml
+          grep -F 'docker push "$WEB_IMAGE"' "$workflow"
+          grep -F 'docker push "$REVOKER_IMAGE"' "$workflow"
+          grep -F 'docker pull --quiet "$WEB_IMAGE"' "$workflow"
+          grep -F 'docker pull --quiet "$REVOKER_IMAGE"' "$workflow"
+          grep -F 'canonical-containers/published' "$workflow"
+          grep -F 'statuses/${SOURCE_SHA}' "$workflow"
 
-          test "$(docker image inspect "$WEB_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$SOURCE_SHA"
-          test "$(docker image inspect "$REVOKER_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$SOURCE_SHA"
-          test "$(docker image inspect "$WEB_IMAGE" --format '{{.Config.User}}')" = '65532:65532'
-          test "$(docker image inspect "$REVOKER_IMAGE" --format '{{.Config.User}}')" = '65532:65532'
-          test "$(docker image inspect "$WEB_IMAGE" --format '{{json .Config.Entrypoint}}')" = '["/usr/local/bin/canonical-web-server"]'
-          test "$(docker image inspect "$REVOKER_IMAGE" --format '{{json .Config.Entrypoint}}')" = '["/usr/local/bin/canonical-session-revoker"]'
+      - name: Explain post-merge evidence
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## Immutable release handoff
 
-          {
-            echo '## Verified immutable Canonical Cloud release'
-            echo
-            echo "- Source: \`${SOURCE_SHA}\`"
-            echo "- Web: \`${WEB_IMAGE}\`"
-            echo "- Revoker: \`${REVOKER_IMAGE}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Remove registry credentials
-        if: always()
-        run: docker logout ghcr.io || true
+          Pull requests validate the release declaration and publisher safety contract.
+          After merge, `publish containers` builds the declared source revision, pushes
+          both SHA tags, removes the local copies, pulls both images back from GHCR,
+          inspects their revision/user/entrypoint contracts, and writes the
+          `canonical-containers/published` commit status on the declared source SHA.
+          EOF
