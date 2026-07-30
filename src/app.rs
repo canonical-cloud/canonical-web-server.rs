@@ -75,6 +75,13 @@ pub async fn build_state(config: Config) -> Result<AppState, AppError> {
     // exact non-owner, non-BYPASSRLS runtime identity. Schema changes are an
     // explicit `migrate` command with a separately mounted credential.
     crate::db::verify_runtime_database_role(&db).await?;
+
+    #[cfg(feature = "test-auth")]
+    if auth::test_provider::BrowserTestAuth::is_enabled() {
+        tracing::warn!("browser-e2e test authentication provider enabled");
+        return AppState::new(config, db, Arc::new(auth::test_provider::BrowserTestAuth));
+    }
+
     let auth = Arc::new(auth::SupabaseAuth::new(
         config.supabase_url.clone(),
         config.supabase_publishable_key.clone(),
