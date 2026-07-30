@@ -1,0 +1,95 @@
+name: materialize canonical immutable release
+
+on:
+  push:
+    branches:
+      - agent/den-668-verify-published-containers
+    paths:
+      - .github/workflows/materialize-canonical-release.yml
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: canonical-release-e09bb95160aaf95a836e810eb20b65e74f6317a6
+  cancel-in-progress: false
+
+env:
+  SOURCE_SHA: e09bb95160aaf95a836e810eb20b65e74f6317a6
+  WEB_IMAGE: ghcr.io/canonical-cloud/canonical-web-server:e09bb95160aaf95a836e810eb20b65e74f6317a6
+  REVOKER_IMAGE: ghcr.io/canonical-cloud/canonical-session-revoker:e09bb95160aaf95a836e810eb20b65e74f6317a6
+
+jobs:
+  publish-and-prove:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out release branch for self-removal
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/den-668-verify-published-containers
+          persist-credentials: true
+          path: release-branch
+
+      - name: Check out exact production source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: e09bb95160aaf95a836e810eb20b65e74f6317a6
+          persist-credentials: false
+          path: source
+
+      - name: Authenticate to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Build production images from the exact source revision
+        working-directory: source
+        run: |
+          set -euo pipefail
+          common_labels=(
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}"
+            --label "org.opencontainers.image.revision=${SOURCE_SHA}"
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          )
+          docker build --pull --target web \
+            "${common_labels[@]}" \
+            --tag "$WEB_IMAGE" .
+          docker build --pull --target revoker \
+            "${common_labels[@]}" \
+            --tag "$REVOKER_IMAGE" .
+
+      - name: Push both immutable tags
+        run: |
+          set -euo pipefail
+          docker push "$WEB_IMAGE"
+          docker push "$REVOKER_IMAGE"
+
+      - name: Prove remote readability and immutable image contracts
+        run: |
+          set -euo pipefail
+          docker image rm "$WEB_IMAGE" "$REVOKER_IMAGE"
+          docker pull --quiet "$WEB_IMAGE"
+          docker pull --quiet "$REVOKER_IMAGE"
+          test "$(docker image inspect "$WEB_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$SOURCE_SHA"
+          test "$(docker image inspect "$REVOKER_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$SOURCE_SHA"
+          test "$(docker image inspect "$WEB_IMAGE" --format '{{.Config.User}}')" = '65532:65532'
+          test "$(docker image inspect "$REVOKER_IMAGE" --format '{{.Config.User}}')" = '65532:65532'
+
+      - name: Remove the one-shot publisher from the branch
+        working-directory: release-branch
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/materialize-canonical-release.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'chore: remove one-shot Canonical release publisher'
+          git push origin HEAD:agent/den-668-verify-published-containers
+
+      - name: Remove registry credentials
+        if: always()
+        run: docker logout ghcr.io || true
