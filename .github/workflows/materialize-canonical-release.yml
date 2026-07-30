@@ -1,14 +1,13 @@
 name: materialize canonical immutable release
 
 on:
-  push:
-    branches:
-      - agent/den-668-verify-published-containers
+  pull_request:
     paths:
       - .github/workflows/materialize-canonical-release.yml
+      - release/current-containers.env
 
 permissions:
-  contents: write
+  contents: read
   packages: write
 
 concurrency:
@@ -22,23 +21,18 @@ env:
 
 jobs:
   publish-and-prove:
-    if: github.actor != 'github-actions[bot]'
+    if: >-
+      github.actor == 'ORESoftware' &&
+      github.head_ref == 'agent/den-668-verify-published-containers' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Check out release branch for self-removal
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: agent/den-668-verify-published-containers
-          persist-credentials: true
-          path: release-branch
-
       - name: Check out exact production source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: e09bb95160aaf95a836e810eb20b65e74f6317a6
           persist-credentials: false
-          path: source
 
       - name: Authenticate to GHCR
         env:
@@ -48,7 +42,6 @@ jobs:
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
 
       - name: Build production images from the exact source revision
-        working-directory: source
         run: |
           set -euo pipefail
           common_labels=(
@@ -79,16 +72,8 @@ jobs:
           test "$(docker image inspect "$REVOKER_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$SOURCE_SHA"
           test "$(docker image inspect "$WEB_IMAGE" --format '{{.Config.User}}')" = '65532:65532'
           test "$(docker image inspect "$REVOKER_IMAGE" --format '{{.Config.User}}')" = '65532:65532'
-
-      - name: Remove the one-shot publisher from the branch
-        working-directory: release-branch
-        run: |
-          set -euo pipefail
-          git rm .github/workflows/materialize-canonical-release.yml
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git commit -m 'chore: remove one-shot Canonical release publisher'
-          git push origin HEAD:agent/den-668-verify-published-containers
+          test "$(docker image inspect "$WEB_IMAGE" --format '{{json .Config.Entrypoint}}')" = '["/usr/local/bin/canonical-web-server"]'
+          test "$(docker image inspect "$REVOKER_IMAGE" --format '{{json .Config.Entrypoint}}')" = '["/usr/local/bin/canonical-session-revoker"]'
 
       - name: Remove registry credentials
         if: always()
