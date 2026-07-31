@@ -1,0 +1,67 @@
+name: verify published containers
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/publish-containers.yml
+      - .github/workflows/verify-published-containers.yml
+      - release/current-containers.env
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-containers.yml
+      - .github/workflows/verify-published-containers.yml
+      - release/current-containers.env
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  declaration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out release declaration and source history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate release declaration
+        shell: bash
+        run: |
+          set -euo pipefail
+          source release/current-containers.env
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$WEB_IMAGE" = "ghcr.io/canonical-cloud/canonical-web-server:${SOURCE_SHA}"
+          test "$REVOKER_IMAGE" = "ghcr.io/canonical-cloud/canonical-session-revoker:${SOURCE_SHA}"
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+
+      - name: Validate publisher proof contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/publish-containers.yml
+          grep -F 'docker push "$WEB_IMAGE"' "$workflow"
+          grep -F 'docker push "$REVOKER_IMAGE"' "$workflow"
+          grep -F 'docker pull --quiet "$WEB_IMAGE"' "$workflow"
+          grep -F 'docker pull --quiet "$REVOKER_IMAGE"' "$workflow"
+          grep -F 'canonical-containers/published' "$workflow"
+          grep -F 'statuses/${SOURCE_SHA}' "$workflow"
+
+      - name: Explain post-merge evidence
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## Immutable release handoff
+
+          Pull requests validate the release declaration and publisher safety contract.
+          After merge, `publish containers` builds the declared source revision, pushes
+          both SHA tags, removes the local copies, pulls both images back from GHCR,
+          inspects their revision/user/entrypoint contracts, and writes the
+          `canonical-containers/published` commit status on the declared source SHA.
+          EOF
