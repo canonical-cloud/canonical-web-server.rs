@@ -1,0 +1,14 @@
+name: Agent instruction hierarchy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    uses: canonical-cloud/canonical.cloud/.github/workflows/agents-hierarchy.yml@5598aec6873e1a16b7e6785acff6092229b82bae
