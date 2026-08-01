@@ -116,8 +116,11 @@ test("playwright rejects hostile login origins and clears origin data on logout"
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   const logoutResponse = await logoutResponsePromise;
   assert.equal(logoutResponse.status(), 303);
+  // Playwright's compact `headers()` API intentionally omits security-related
+  // response headers. Read the complete wire-visible set for this boundary.
+  const logoutHeaders = await logoutResponse.allHeaders();
   assert.equal(
-    logoutResponse.headers()["clear-site-data"],
+    logoutHeaders["clear-site-data"],
     '"cache", "cookies", "storage"',
   );
   await page.waitForURL(`${server.url}/login`);
