@@ -6,8 +6,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
 
 concurrency:
   group: create-exact-meta-agent-repository-selfhosted
@@ -18,293 +16,32 @@ jobs:
     if: >-
       github.event.comment.user.login == 'ORESoftware' &&
       github.event.comment.body == 'ops-create-meta-agent-repo-selfhosted:2026-08-01'
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     runs-on: canonical-browser
     timeout-minutes: 30
     env:
-      OAUTH_CLIENT_ID: 178c6fc778ccc68e1d6a
-      EXPECTED_LOGIN: ORESoftware
-      TARGET_REPOSITORY: meta-agents-demo/meta-agent-control-plane.rs
-      SOURCE_SHA: 55ee15c190b7cfa4e075f6984c7cb551acd4b9d3
-      BUNDLE_SHA256: 1ddaa03743b864348162149b7d2d2e2dce7eab585cf092ea14547c647fcec031
-      PUBLISHER_SHA256: e2fe6eaa622db02a54f83e27a822f64ad4b54971c883f97bbda4ac0a4db5d278
-      EXPECTED_MAIN: 4d6ec3ad0ec7b688f0e777129eee7e0f0d999df1
-      EXPECTED_FEATURE: 789d48039da232faed985d4f8de176959f117e08
-      FEATURE_REF: agent/den-1057-meta-agent-control-plane
+      COMMENT_TOKEN: ${{ github.token }}
       TRACKING_ISSUE: ${{ github.event.issue.number }}
+      SOURCE_ROOT: ${{ github.workspace }}/source
 
     steps:
+      - name: Check out trusted orchestration code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: runner
+          persist-credentials: false
+
       - name: Check out immutable publication source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ORESoftware/k8s-cluster
-          ref: ${{ env.SOURCE_SHA }}
+          ref: 55ee15c190b7cfa4e075f6984c7cb551acd4b9d3
           path: source
           persist-credentials: false
 
-      - name: Request short-lived owner authorization
+      - name: Authorize owner, create repository, and verify exact refs
         shell: bash
-        env:
-          COMMENT_TOKEN: ${{ github.token }}
-        run: |
-          set -Eeuo pipefail
-          umask 077
-          python3 - <<'PY'
-          import json
-          import os
-          import time
-          import urllib.error
-          import urllib.parse
-          import urllib.request
-
-          client_id = os.environ["OAUTH_CLIENT_ID"]
-          repo = os.environ["GITHUB_REPOSITORY"]
-          issue = os.environ["TRACKING_ISSUE"]
-          comment_token = os.environ["COMMENT_TOKEN"]
-
-          def request(method: str, url: str, *, token: str | None = None, form=None, payload=None):
-              data = None
-              headers = {"Accept": "application/json", "User-Agent": "meta-agent-selfhosted-publisher"}
-              if token:
-                  headers["Authorization"] = f"Bearer {token}"
-                  headers["X-GitHub-Api-Version"] = "2022-11-28"
-              if form is not None:
-                  data = urllib.parse.urlencode(form).encode()
-                  headers["Content-Type"] = "application/x-www-form-urlencoded"
-              elif payload is not None:
-                  data = json.dumps(payload).encode()
-                  headers["Content-Type"] = "application/json"
-              req = urllib.request.Request(url, data=data, headers=headers, method=method)
-              try:
-                  with urllib.request.urlopen(req, timeout=30) as response:
-                      raw = response.read()
-                      return response.status, json.loads(raw.decode()) if raw else None
-              except urllib.error.HTTPError as exc:
-                  body = exc.read(4096).decode(errors="replace")
-                  raise SystemExit(f"HTTP {exc.code} for {url}: {body}") from exc
-
-          status, device = request(
-              "POST",
-              "https://github.com/login/device/code",
-              form={"client_id": client_id, "scope": "repo read:org"},
-          )
-          if status != 200 or not isinstance(device, dict):
-              raise SystemExit("GitHub device-code request failed")
-          device_code = device.get("device_code")
-          user_code = device.get("user_code")
-          verification_uri = device.get("verification_uri")
-          expires_in = int(device.get("expires_in", 0))
-          interval = int(device.get("interval", 5))
-          if not all(isinstance(value, str) and value for value in (device_code, user_code, verification_uri)):
-              raise SystemExit("GitHub device-code response is incomplete")
-          if expires_in <= 0 or interval <= 0:
-              raise SystemExit("GitHub device-code timing is invalid")
-
-          run_url = f"https://github.com/{repo}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
-          comment = (
-              f"**Authorize exact Meta Agents repository creation now:** open {verification_uri} "
-              f"and enter **`{user_code}`**. Ignore all older codes. This self-hosted run accepts only "
-              f"GitHub account `{os.environ['EXPECTED_LOGIN']}` with active admin access to "
-              f"`meta-agents-demo`. Run: {run_url}"
-          )
-          request(
-              "POST",
-              f"https://api.github.com/repos/{repo}/issues/{issue}/comments",
-              token=comment_token,
-              payload={"body": comment},
-          )
-          print(f"::notice title=GitHub owner authorization::Open {verification_uri} and enter {user_code}")
-
-          deadline = time.monotonic() + expires_in
-          access_token = None
-          while time.monotonic() < deadline:
-              time.sleep(interval)
-              status, response = request(
-                  "POST",
-                  "https://github.com/login/oauth/access_token",
-                  form={
-                      "client_id": client_id,
-                      "device_code": device_code,
-                      "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                  },
-              )
-              if status != 200 or not isinstance(response, dict):
-                  raise SystemExit("GitHub device-token request failed")
-              error = response.get("error")
-              if not error:
-                  access_token = response.get("access_token")
-                  break
-              if error == "authorization_pending":
-                  continue
-              if error == "slow_down":
-                  interval += 5
-                  continue
-              raise SystemExit(f"GitHub device authorization failed: {error}")
-
-          if not isinstance(access_token, str) or not access_token:
-              raise SystemExit("GitHub device authorization expired")
-          print(f"::add-mask::{access_token}")
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
-              handle.write(f"GH_TOKEN={access_token}\n")
-              handle.write(f"GITHUB_REPOSITORY_ADMIN_TOKEN={access_token}\n")
-          PY
-
-      - name: Verify exact owner identity and organization role
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-          import urllib.request
-
-          token = os.environ["GH_TOKEN"]
-          headers = {
-              "Accept": "application/vnd.github+json",
-              "Authorization": f"Bearer {token}",
-              "X-GitHub-Api-Version": "2022-11-28",
-              "User-Agent": "meta-agent-selfhosted-publisher",
-          }
-
-          def get(path: str):
-              req = urllib.request.Request("https://api.github.com" + path, headers=headers)
-              with urllib.request.urlopen(req, timeout=30) as response:
-                  return json.load(response)
-
-          user = get("/user")
-          if user.get("login") != os.environ["EXPECTED_LOGIN"]:
-              raise SystemExit("unexpected owner identity")
-          membership = get("/user/memberships/orgs/meta-agents-demo")
-          if (membership.get("role"), membership.get("state")) != ("admin", "active"):
-              raise SystemExit("ORESoftware is not an active meta-agents-demo owner")
-          PY
-
-      - name: Reconstruct and verify exact recovered history
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          work="$RUNNER_TEMP/meta-agent-publication"
-          mkdir -p "$work"
-          bundle="$work/meta-agent-control-plane-den-1057.bundle"
-          cat source/scripts/critical-org-fleet/assets/meta.part* | base64 --decode > "$bundle"
-          printf '%s  %s\n' "$BUNDLE_SHA256" "$bundle" | sha256sum --check --strict
-          test "$(git bundle list-heads "$bundle" | wc -l)" -eq 2
-          test "$(git bundle list-heads "$bundle" | awk '$2 == "refs/heads/main" {print $1}')" = "$EXPECTED_MAIN"
-          test "$(git bundle list-heads "$bundle" | awk -v ref="refs/heads/$FEATURE_REF" '$2 == ref {print $1}')" = "$EXPECTED_FEATURE"
-          publisher="source/scripts/critical-org-fleet/publish_meta_control_plane.py"
-          printf '%s  %s\n' "$PUBLISHER_SHA256" "$publisher" | sha256sum --check --strict
-          python3 -m py_compile "$publisher"
-          printf 'BUNDLE_PATH=%s\n' "$bundle" >> "$GITHUB_ENV"
-          printf 'PUBLISHER_PATH=%s\n' "$publisher" >> "$GITHUB_ENV"
-
-      - name: Create public repository and push exact refs without force
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          export GIT_TERMINAL_PROMPT=0
-          python3 "$PUBLISHER_PATH" "$BUNDLE_PATH"
-
-      - name: Verify live repository and report success
-        shell: bash
-        env:
-          COMMENT_TOKEN: ${{ github.token }}
-        run: |
-          set -Eeuo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-          import urllib.request
-
-          token = os.environ["GH_TOKEN"]
-          headers = {
-              "Accept": "application/vnd.github+json",
-              "Authorization": f"Bearer {token}",
-              "X-GitHub-Api-Version": "2022-11-28",
-              "User-Agent": "meta-agent-selfhosted-verifier",
-          }
-
-          def get(path: str):
-              req = urllib.request.Request("https://api.github.com" + path, headers=headers)
-              with urllib.request.urlopen(req, timeout=30) as response:
-                  return json.load(response)
-
-          target = os.environ["TARGET_REPOSITORY"]
-          metadata = get(f"/repos/{target}")
-          if metadata.get("visibility") != "public" or metadata.get("default_branch") != "main":
-              raise SystemExit("target repository metadata mismatch")
-          expected = {
-              "main": os.environ["EXPECTED_MAIN"],
-              os.environ["FEATURE_REF"]: os.environ["EXPECTED_FEATURE"],
-          }
-          for branch, sha in expected.items():
-              ref = get(f"/repos/{target}/git/ref/heads/{branch}")
-              if ((ref.get("object") or {}).get("sha")) != sha:
-                  raise SystemExit(f"{branch} ref mismatch")
-          PY
-
-          python3 - <<'PY'
-          import json
-          import os
-          import urllib.request
-
-          repo = os.environ["GITHUB_REPOSITORY"]
-          issue = os.environ["TRACKING_ISSUE"]
-          token = os.environ["COMMENT_TOKEN"]
-          body = (
-              f"Created and verified `{os.environ['TARGET_REPOSITORY']}`: `main` "
-              f"`{os.environ['EXPECTED_MAIN']}`; `{os.environ['FEATURE_REF']}` "
-              f"`{os.environ['EXPECTED_FEATURE']}`. Run: "
-              f"https://github.com/{repo}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
-          )
-          req = urllib.request.Request(
-              f"https://api.github.com/repos/{repo}/issues/{issue}/comments",
-              data=json.dumps({"body": body}).encode(),
-              headers={
-                  "Accept": "application/vnd.github+json",
-                  "Authorization": f"Bearer {token}",
-                  "X-GitHub-Api-Version": "2022-11-28",
-                  "Content-Type": "application/json",
-                  "User-Agent": "meta-agent-selfhosted-publisher",
-              },
-              method="POST",
-          )
-          with urllib.request.urlopen(req, timeout=30):
-              pass
-          PY
-
-      - name: Report failed publication
-        if: ${{ failure() }}
-        shell: bash
-        env:
-          COMMENT_TOKEN: ${{ github.token }}
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          import urllib.error
-          import urllib.request
-
-          repo = os.environ["GITHUB_REPOSITORY"]
-          issue = os.environ["TRACKING_ISSUE"]
-          token = os.environ["COMMENT_TOKEN"]
-          body = (
-              "Exact Meta Agents repository creation failed before live ref verification. Inspect: "
-              f"https://github.com/{repo}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
-          )
-          req = urllib.request.Request(
-              f"https://api.github.com/repos/{repo}/issues/{issue}/comments",
-              data=json.dumps({"body": body}).encode(),
-              headers={
-                  "Accept": "application/vnd.github+json",
-                  "Authorization": f"Bearer {token}",
-                  "X-GitHub-Api-Version": "2022-11-28",
-                  "Content-Type": "application/json",
-                  "User-Agent": "meta-agent-selfhosted-publisher",
-              },
-              method="POST",
-          )
-          try:
-              with urllib.request.urlopen(req, timeout=30):
-                  pass
-          except urllib.error.URLError:
-              pass
-          PY
+        run: python3 runner/scripts/ops-create-meta-agent-repo-selfhosted.py
