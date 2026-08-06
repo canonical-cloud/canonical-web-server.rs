@@ -1,7 +1,5 @@
 use crate::{
-    auth::{
-        require_csrf, require_origin, Authenticated, CredentialSource, SessionAuthenticated,
-    },
+    auth::{require_csrf, require_origin, Authenticated, CredentialSource, SessionAuthenticated},
     error::AppError,
     quotes::{self, QuoteRecord, QuoteRequest},
     AppState,

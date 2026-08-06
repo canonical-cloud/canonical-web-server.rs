@@ -51,14 +51,6 @@ CREATE POLICY compliance_quote_owner ON compliance_quote
   USING (owner_id = auth.uid())
   WITH CHECK (owner_id = auth.uid());
 
-DO $roles$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'canonical_web_server') THEN
-    GRANT SELECT ON canonical_context TO canonical_web_server;
-    GRANT SELECT, INSERT, UPDATE ON compliance_quote TO canonical_web_server;
-  END IF;
-END
-$roles$;
 
 INSERT INTO canonical_context (
   id, context_key, version, context_markdown, active

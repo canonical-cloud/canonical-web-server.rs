@@ -123,12 +123,13 @@ pub struct QuoteForm {
 
 impl QuoteForm {
     fn into_request(self) -> Result<QuoteRequest, AppError> {
-        let employee_count = match self.employee_count.trim() {
-            "" => None,
-            value => Some(value.parse::<u32>().map_err(|_| {
-                AppError::BadRequest("employees must be a whole number".into())
-            })?),
-        };
+        let employee_count =
+            match self.employee_count.trim() {
+                "" => None,
+                value => Some(value.parse::<u32>().map_err(|_| {
+                    AppError::BadRequest("employees must be a whole number".into())
+                })?),
+            };
         let frameworks = [
             ("soc2", self.soc2),
             ("nist_csf", self.nist_csf),
@@ -210,10 +211,9 @@ fn form_error(headers: &HeaderMap, message: &str) -> Response {
     let fragment = html! { p class="error" role="alert" { (message) } };
     if headers.contains_key("hx-request") {
         let mut response = (StatusCode::UNPROCESSABLE_ENTITY, fragment).into_response();
-        response.headers_mut().insert(
-            "hx-retarget",
-            HeaderValue::from_static("#quote-results"),
-        );
+        response
+            .headers_mut()
+            .insert("hx-retarget", HeaderValue::from_static("#quote-results"));
         response
     } else {
         (StatusCode::UNPROCESSABLE_ENTITY, fragment).into_response()

@@ -19,12 +19,7 @@ use serde_json::{json, Value as JsonValue};
 use tokio::sync::{broadcast, Semaphore};
 use uuid::Uuid;
 
-use crate::{
-    auth::AuthContext,
-    db::begin_user_transaction,
-    error::AppError,
-    AppState,
-};
+use crate::{auth::AuthContext, db::begin_user_transaction, error::AppError, AppState};
 
 pub const FRAMEWORKS: &[&str] = &[
     "soc2",
@@ -108,12 +103,8 @@ impl QuoteRequest {
                 "at least one supported compliance framework is required".into(),
             ));
         }
-        self.cloud_providers = normalized_choices(
-            self.cloud_providers,
-            CLOUD_PROVIDERS,
-            "cloudProviders",
-            6,
-        )?;
+        self.cloud_providers =
+            normalized_choices(self.cloud_providers, CLOUD_PROVIDERS, "cloudProviders", 6)?;
 
         self.target_date = normalized_optional(self.target_date, 10, "targetDate")?;
         if let Some(target_date) = &self.target_date {
@@ -280,15 +271,7 @@ async fn run_analysis(
     let prompt = build_prompt(STATIC_QUOTE_CONTEXT, &database_context, request)?;
     match call_gemini(model, &prompt).await {
         Ok(analysis) => {
-            set_status(
-                state,
-                owner_id,
-                quote_id,
-                "ready",
-                Some(analysis),
-                None,
-            )
-            .await?;
+            set_status(state, owner_id, quote_id, "ready", Some(analysis), None).await?;
         }
         Err(error) => {
             tracing::warn!(
@@ -456,9 +439,8 @@ async fn call_gemini(model: &str, prompt: &str) -> Result<JsonValue, AnalysisErr
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
         .ok_or(AnalysisError::Unconfigured)?;
-    let endpoint = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    );
+    let endpoint =
+        format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent");
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(5))
         .timeout(std::time::Duration::from_secs(90))
@@ -554,10 +536,7 @@ fn analysis_schema() -> JsonValue {
 fn validate_analysis(value: &JsonValue) -> Result<(), AnalysisError> {
     let object = value.as_object().ok_or(AnalysisError::InvalidResponse)?;
     for string_field in ["executiveSummary"] {
-        if !object
-            .get(string_field)
-            .is_some_and(JsonValue::is_string)
-        {
+        if !object.get(string_field).is_some_and(JsonValue::is_string) {
             return Err(AnalysisError::InvalidResponse);
         }
     }

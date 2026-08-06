@@ -99,8 +99,8 @@ pub fn build_api_app(state: AppState) -> Router {
 
 fn decorate_http(app: Router) -> Router {
     let request_id_header = HeaderName::from_static("x-request-id");
-    let app = telemetry::instrument_http(app)
-        .layer(axum::middleware::from_fn(metrics::record_http));
+    let app =
+        telemetry::instrument_http(app).layer(axum::middleware::from_fn(metrics::record_http));
 
     app.layer((
         SetSensitiveRequestHeadersLayer::new([header::AUTHORIZATION, header::COOKIE]),
