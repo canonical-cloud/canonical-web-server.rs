@@ -165,7 +165,11 @@ fn quote_error(headers: &HeaderMap, message: &str) -> Response {
     if headers.contains_key("hx-request") {
         views::quote_error(message).into_response()
     } else {
-        (StatusCode::UNPROCESSABLE_ENTITY, views::quote_error(message)).into_response()
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            views::quote_error(message),
+        )
+            .into_response()
     }
 }
 
