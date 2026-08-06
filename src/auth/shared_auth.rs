@@ -183,9 +183,10 @@ fn verified_expiry(token: &str) -> chrono::DateTime<Utc> {
 fn validate_cookie_name(value: &str, secure: bool) -> Result<(), AppError> {
     let valid = !value.is_empty()
         && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'!' | b'#'..=b'+' | b'-' | b'.' | b'^'..=b'`' | b'|' | b'~'));
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(byte, b'!' | b'#'..=b'+' | b'-' | b'.' | b'^'..=b'`' | b'|' | b'~')
+        });
     if !valid || (secure && !value.starts_with("__Host-")) {
         return Err(AppError::BadRequest(
             "SHARED_AUTH_BROWSER_COOKIE_NAME must be a valid host-only cookie name".into(),
@@ -236,8 +237,14 @@ mod tests {
     #[test]
     fn csrf_is_stable_and_bound_to_the_verified_cookie() {
         let verifier = verifier();
-        assert_eq!(verifier.csrf_token("token-a"), verifier.csrf_token("token-a"));
-        assert_ne!(verifier.csrf_token("token-a"), verifier.csrf_token("token-b"));
+        assert_eq!(
+            verifier.csrf_token("token-a"),
+            verifier.csrf_token("token-a")
+        );
+        assert_ne!(
+            verifier.csrf_token("token-a"),
+            verifier.csrf_token("token-b")
+        );
     }
 
     #[test]
