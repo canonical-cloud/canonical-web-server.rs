@@ -195,8 +195,7 @@ pub fn quote_page(actor: &AuthContext, quotes: &[QuoteResponse]) -> Markup {
                 style {
                     "body{font-family:ui-sans-serif,system-ui,sans-serif;max-width:64rem;margin:0 auto;padding:2rem;line-height:1.5}.card{border:1px solid #8886;border-radius:.75rem;padding:1.25rem;margin:1rem 0}label{display:block;margin:.75rem 0}input,textarea,select,button{font:inherit;padding:.65rem}input,textarea,select{box-sizing:border-box;width:100%}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.6rem}.grid label{display:flex;gap:.5rem;align-items:center;margin:0}.grid input{width:auto}.muted{opacity:.72}.error{color:#b42318}.quote-total{font-size:1.5rem;font-weight:700}"
                 }
-                script src="https://unpkg.com/htmx.org@2.0.8"
-                    integrity="sha384-2kIcA/qQhVfYwGUnjHrVt0CIRmTpq5U1tlMZcW6uJJbTqSxSZ6w0e1k9xgS9yv" crossorigin="anonymous" {}
+                script type="module" src="/app-assets/app.js" {}
             }
             body {
                 nav { a href="/" { "← canonical.plus" } }
