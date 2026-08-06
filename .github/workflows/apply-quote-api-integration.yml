@@ -25,18 +25,19 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy
 
-      - name: Format and verify Rust
+      - name: Refresh lockfile, format, and verify Rust
         run: |
           set -euo pipefail
+          cargo +1.95.0 generate-lockfile
           cargo +1.95.0 fmt --all
           cargo +1.95.0 test --workspace --all-targets --all-features --locked
           cargo +1.95.0 clippy --workspace --all-targets --all-features --locked -- -D warnings
 
-      - name: Commit source-only integration
+      - name: Commit verified integration
         run: |
           set -euo pipefail
           git config user.name 'canonical-implementation-bot'
           git config user.email 'canonical-implementation-bot@users.noreply.github.com'
-          git add .env.example README.md src tests/gemini_model_contract.rs
+          git add Cargo.toml Cargo.lock .env.example README.md src tests/gemini_model_contract.rs
           git commit -m 'feat: delegate quote analysis to canonical API'
           git push origin HEAD:agent/quote-api-integration-v2
