@@ -38,6 +38,8 @@ pub enum AppError {
     Crypto,
     #[error("serialization failed")]
     Serialization(#[from] serde_json::Error),
+    #[error("invalid service configuration: {0}")]
+    Configuration(&'static str),
 }
 
 impl From<canonical_session::SessionError> for AppError {
