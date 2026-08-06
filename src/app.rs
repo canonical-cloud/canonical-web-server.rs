@@ -1,6 +1,6 @@
 //! Application state and HTTP router assembly.
 
-use std::sync::Arc;
+use std::{env, sync::Arc, time::Duration};
 
 use axum::{
     http::{header, HeaderName, HeaderValue},
@@ -23,6 +23,66 @@ use crate::{
 };
 
 #[derive(Clone)]
+pub(crate) struct QuoteClient {
+    pub base_url: String,
+    pub http: reqwest::Client,
+    pub maximum_assertion_age_seconds: i64,
+    pub origin_assertion_secret: Vec<u8>,
+}
+
+impl QuoteClient {
+    fn from_env() -> Result<Self, AppError> {
+        let raw_url = env::var("CANONICAL_API_URL")
+            .map_err(|_| AppError::Configuration("CANONICAL_API_URL is required"))?;
+        let parsed = reqwest::Url::parse(&raw_url)
+            .map_err(|_| AppError::Configuration("CANONICAL_API_URL must be an absolute URL"))?;
+        if !matches!(parsed.scheme(), "http" | "https")
+            || parsed.host_str().is_none()
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+            || parsed.query().is_some()
+            || parsed.fragment().is_some()
+            || parsed.path() != "/"
+        {
+            return Err(AppError::Configuration(
+                "CANONICAL_API_URL must be an HTTP(S) origin without credentials or a path",
+            ));
+        }
+        let secret = env::var("ORIGIN_ASSERTION_SECRET")
+            .map_err(|_| AppError::Configuration("ORIGIN_ASSERTION_SECRET is required"))?
+            .into_bytes();
+        if secret.len() < 32 {
+            return Err(AppError::Configuration(
+                "ORIGIN_ASSERTION_SECRET must contain at least 32 bytes",
+            ));
+        }
+        let maximum_assertion_age_seconds = env::var("ORIGIN_ASSERTION_MAX_AGE_SECONDS")
+            .unwrap_or_else(|_| "30".to_owned())
+            .parse::<i64>()
+            .map_err(|_| {
+                AppError::Configuration("ORIGIN_ASSERTION_MAX_AGE_SECONDS must be an integer")
+            })?;
+        if !(5..=60).contains(&maximum_assertion_age_seconds) {
+            return Err(AppError::Configuration(
+                "ORIGIN_ASSERTION_MAX_AGE_SECONDS must be between 5 and 60",
+            ));
+        }
+        let http = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(240))
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent("canonical-web-server/0.1")
+            .build()?;
+        Ok(Self {
+            base_url: parsed.origin().ascii_serialization(),
+            http,
+            maximum_assertion_age_seconds,
+            origin_assertion_secret: secret,
+        })
+    }
+}
+
+#[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
     pub db: sea_orm::DatabaseConnection,
@@ -32,6 +92,7 @@ pub struct AppState {
     pub sessions: auth::SessionService,
     pub hub: ws::Hub,
     pub(crate) bearer_auth_semaphore: Arc<Semaphore>,
+    pub(crate) quote: Option<Arc<QuoteClient>>,
 }
 
 impl AppState {
@@ -65,6 +126,7 @@ impl AppState {
             sessions,
             hub: ws::Hub::new(256),
             bearer_auth_semaphore,
+            quote: None,
         })
     }
 }
@@ -86,7 +148,9 @@ pub async fn build_state(config: Config) -> Result<AppState, AppError> {
         config.supabase_url.clone(),
         config.supabase_publishable_key.clone(),
     )?);
-    AppState::new(config, db, auth)
+    let mut state = AppState::new(config, db, auth)?;
+    state.quote = Some(Arc::new(QuoteClient::from_env()?));
+    Ok(state)
 }
 
 pub fn build_app(state: AppState) -> Router {
