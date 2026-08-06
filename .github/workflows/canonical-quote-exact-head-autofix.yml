@@ -1,0 +1,57 @@
+name: Canonical quote exact-head autofix
+
+on:
+  push:
+    branches:
+      - feat/canonical-plus-quote-platform
+
+permissions:
+  contents: write
+
+concurrency:
+  group: canonical-quote-exact-head-autofix
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: feat/canonical-plus-quote-platform
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          components: rustfmt
+          toolchain: "1.95.0"
+      - name: Apply requested model default and formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          quotes = Path("src/quotes.rs")
+          text = quotes.read_text()
+          published = 'const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-pro-preview";'
+          requested = 'const DEFAULT_GEMINI_MODEL: &str = "gemini-3.6-pro";'
+          if published in text:
+              text = text.replace(published, requested, 1)
+          elif requested not in text:
+              raise SystemExit("unexpected Gemini default model contract")
+          quotes.write_text(text)
+          PY
+
+          cargo fmt --all
+          git diff --check
+          if git diff --quiet; then
+            echo "source already matches the requested exact-head state"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/quotes.rs src/auth/shared_auth.rs src/routes/quote.rs
+          git commit -m "fix: default quotes to Gemini 3.6 Pro"
+          git push origin HEAD:feat/canonical-plus-quote-platform
