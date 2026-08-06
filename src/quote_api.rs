@@ -17,7 +17,6 @@ const MAX_RESPONSE_BYTES: usize = 512 * 1024;
 #[derive(Clone)]
 pub struct QuoteApiClient {
     base_url: String,
-    context_record_id: Uuid,
     http: Client,
     internal_auth_token: Arc<str>,
 }
@@ -54,13 +53,6 @@ impl QuoteApiClient {
             ));
         }
 
-        let context_record_id = env::var("CANONICAL_CONTEXT_RECORD_ID")
-            .map_err(|_| AppError::BadRequest("CANONICAL_CONTEXT_RECORD_ID is required".into()))?
-            .parse::<Uuid>()
-            .map_err(|_| {
-                AppError::BadRequest("CANONICAL_CONTEXT_RECORD_ID must be a UUID".into())
-            })?;
-
         let http = Client::builder()
             .connect_timeout(Duration::from_secs(3))
             .timeout(Duration::from_secs(20))
@@ -70,7 +62,6 @@ impl QuoteApiClient {
 
         Ok(Self {
             base_url: parsed.origin().ascii_serialization(),
-            context_record_id,
             http,
             internal_auth_token: Arc::from(internal_auth_token),
         })
@@ -82,7 +73,6 @@ impl QuoteApiClient {
         request: &QuoteRequest,
     ) -> Result<QuoteResponse, AppError> {
         let payload = ApiCreateQuoteRequest {
-            context_record_id: self.context_record_id,
             frameworks: &request.frameworks,
             notes: request.analysis_notes(),
             organization: ApiOrganization {
@@ -226,7 +216,6 @@ impl QuoteRequest {
 
 #[derive(Serialize)]
 struct ApiCreateQuoteRequest<'a> {
-    context_record_id: Uuid,
     frameworks: &'a [String],
     notes: Option<String>,
     organization: ApiOrganization<'a>,
@@ -454,6 +443,23 @@ pub fn quote_status_fragment(quote: &QuoteResponse) -> Markup {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_payload_cannot_select_a_database_context() {
+        let frameworks = vec!["soc2".to_owned()];
+        let payload = ApiCreateQuoteRequest {
+            frameworks: &frameworks,
+            notes: None,
+            organization: ApiOrganization {
+                employee_count: 10,
+                industry: "Software",
+                legal_name: "Example",
+            },
+        };
+        let value = serde_json::to_value(payload).unwrap();
+        assert!(value.get("context_record_id").is_none());
+        assert!(value.get("markdown_context").is_none());
+    }
 
     #[test]
     fn maps_the_durable_api_record() {

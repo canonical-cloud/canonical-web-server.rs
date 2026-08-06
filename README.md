@@ -44,7 +44,7 @@ credentials or the server's Supabase token pair.
 - `src/quote_api.rs` — bounded client and Maud views for the separately deployed
   `canonical-api-server.rs`; it sends the Shared Auth subject under
   `x-canonical-subject`, authenticates with `CANONICAL_INTERNAL_AUTH_TOKEN`,
-  fixes `CANONICAL_CONTEXT_RECORD_ID` server-side, and never exposes Gemini or
+  and never exposes or selects the owner-scoped database context, Gemini, or
   database credentials.
 - `src/sync/` — compare-and-swap mutations, durable idempotency, tombstones,
   owner-bound encrypted cursors, and pull pagination.
@@ -86,7 +86,8 @@ through to the marketing SPA.
 The `/u/quote` handlers verify the host-only Shared Auth session at the origin,
 then call the dedicated API over its private Kubernetes origin. Browser input
 cannot choose the internal service token, authenticated subject, Canonical
-context record, application Markdown, Gemini key, or Gemini model.
+context record, application Markdown, Gemini key, or Gemini model. The API
+selects the authenticated owner's single active context row.
 
 ## Multi-instance invalidations
 
