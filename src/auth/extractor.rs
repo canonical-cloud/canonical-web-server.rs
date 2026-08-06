@@ -206,10 +206,16 @@ mod tests {
         let mut headers = HeaderMap::new();
         assert_eq!(bearer_token(&headers).unwrap(), None);
 
-        headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer token"));
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer token"),
+        );
         assert_eq!(bearer_token(&headers).unwrap(), Some("token"));
 
-        headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Basic token"));
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Basic token"),
+        );
         assert!(bearer_token(&headers).is_err());
 
         headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer "));
