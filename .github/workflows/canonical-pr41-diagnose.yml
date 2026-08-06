@@ -43,20 +43,20 @@ jobs:
 
           quotes = Path("src/quotes.rs")
           text = quotes.read_text()
-          old = '''                    Some(Ok(Message::Ping(payload))) => {
-                              if outgoing.send(Message::Pong(payload)).await.is_err() {
-                                  break;
-                              }
-                          }
-          '''
-          old = "\n".join(line[20:] if line.startswith("                    ") else line for line in old.splitlines()) + "\n"
-          new = '''                    Some(Ok(Message::Ping(payload)))
-                              if outgoing.send(Message::Pong(payload)).await.is_err() =>
-                          {
-                              break;
-                          }
-          '''
-          new = "\n".join(line[20:] if line.startswith("                    ") else line for line in new.splitlines()) + "\n"
+          old = "\n".join([
+              "                    Some(Ok(Message::Ping(payload))) => {",
+              "                        if outgoing.send(Message::Pong(payload)).await.is_err() {",
+              "                            break;",
+              "                        }",
+              "                    }",
+          ]) + "\n"
+          new = "\n".join([
+              "                    Some(Ok(Message::Ping(payload)))",
+              "                        if outgoing.send(Message::Pong(payload)).await.is_err() =>",
+              "                    {",
+              "                        break;",
+              "                    }",
+          ]) + "\n"
           if old not in text:
               raise SystemExit("expected WebSocket Ping arm was not found")
           quotes.write_text(text.replace(old, new, 1))
@@ -64,10 +64,10 @@ jobs:
           workflow = Path(".github/workflows/ci.yml")
           text = workflow.read_text()
           marker = "          cargo metadata --locked --format-version 1 > /tmp/cargo-metadata.json\n"
-          diagnostic = '''          echo "Resolved dependency path to rkyv 0.7.46:"
-                    cargo tree --workspace --locked --invert rkyv@0.7.46 --edges normal,build,dev || true
-          '''
-          diagnostic = "\n".join(line[10:] if line.startswith("          ") else line for line in diagnostic.splitlines()) + "\n"
+          diagnostic = (
+              "          echo \"Resolved dependency path to rkyv 0.7.46:\"\n"
+              "          cargo tree --workspace --locked --invert rkyv@0.7.46 --edges normal,build,dev || true\n"
+          )
           if diagnostic not in text:
               if marker not in text:
                   raise SystemExit("rkyv metadata guard marker was not found")
