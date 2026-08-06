@@ -326,3 +326,57 @@ docker run --env-file .env.local -p 8081:8081 \
 docker run --env-file .env.revoker.local canonical-session-revoker check
 docker run --env-file .env.revoker.local canonical-session-revoker run
 ```
+
+## Cross-surface delivery
+
+User-visible, quote, intake, framework, context, evidence, authentication,
+notification, permission, navigation, or deep-link changes in this Rust web/BFF
+must be evaluated for:
+
+- `canonical-cloud/canonical-agent-flutter` on Android, iOS, Flutter Web/mobile
+  web, and Flutter desktop when that proposed client is activated;
+- `canonical-cloud/canonical-agent-desktop.rs`, the proposed Rust desktop/local
+  evidence agent; and
+- Canonical interfaces, generated clients, quote/intake/framework/context/
+  evidence schemas, route types, compliance fixtures, and conformance tests.
+
+This is judgment-based coordination. Public marketing, SEO, server-rendered
+quote presentation, and browser-only account administration may remain
+web-specific. Local filesystem inventories, evidence collection, policy checks,
+browser/device attestations, watched folders, secure upload queues,
+signing/update behavior, and offline collection may be native-specific. Quote
+and intake semantics, framework selection, context records, evidence status,
+authentication, permissions, errors, notifications, and navigation normally
+require coordinated changes or an explicit no-change rationale and parity
+follow-up.
+
+Mobile does not need privileged local-evidence collection merely for parity. A
+good design may keep collection in the signed desktop agent while mobile
+provides status, approval, notification, and deep-link workflows. The native
+repositories remain proposed allocation targets and must not be described as
+published until their remotes and builds are verified.
+
+Deep links are HTTPS-first:
+
+```text
+https://<verified-canonical-owned-host>/open/<route>?<bounded-query>
+```
+
+The exact host must be proven before publication. A custom-scheme fallback
+requires a reviewed ADR and must not be guessed. Web and future clients must
+share versioned route types and fixtures and support cold start,
+already-running delivery, authentication resume, replay/expiry rejection,
+browser fallback, and explicit confirmation before quote submission, evidence
+import/upload, connector changes, attestations, approvals, or destructive
+operations.
+
+Quote answers, compliance evidence, private documents, filesystem inventories,
+absolute local paths, browser/device attestations, credentials, Supabase
+sessions, service tokens, model prompts/context, personally identifiable
+information, bearer/refresh tokens, and signing material are prohibited in
+URLs. Use bounded identifiers or short-lived, single-use, audience-bound codes
+and validate route version, user/quote/framework/context/evidence identity,
+action, authorization, assurance level, limits, and user intent.
+
+See [`docs/CROSS_SURFACE_DELIVERY.md`](docs/CROSS_SURFACE_DELIVERY.md) and the
+[portfolio policy](https://github.com/ORESoftware/project-registry/blob/main/docs/cross-surface-delivery.md).
