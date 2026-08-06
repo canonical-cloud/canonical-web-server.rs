@@ -7,6 +7,7 @@ pub mod command;
 pub mod database;
 pub mod error;
 pub mod metrics;
+pub mod quotes;
 pub mod routes;
 pub mod server;
 pub mod sync;
