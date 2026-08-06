@@ -1,4 +1,4 @@
-name: Test Canonical SeaORM migration feature patch
+name: Diagnose Canonical SeaORM decimal feature path
 
 on:
   push:
@@ -10,9 +10,9 @@ permissions:
   contents: read
 
 jobs:
-  dependency-fix:
+  dependency-path:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 20
     env:
       RELEASE_SHA: 459d18e8248de7802c82b280232977cdf7c517cb
       SEA_ORM_SHA: fd3d3de8a37df4ff790ff1661bb572b9ec1350d0
@@ -26,10 +26,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
           toolchain: "1.95.0"
-          components: rustfmt,clippy
       - name: Assert immutable source head
         run: test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
-      - name: Vendor the exact upstream migration crate with defaults disabled
+      - name: Apply the first migration-default correction
         shell: bash
         run: |
           set -euo pipefail
@@ -61,8 +60,6 @@ jobs:
 
           root = Path("Cargo.toml")
           text = root.read_text()
-          if "[patch.crates-io]" in text:
-              raise SystemExit("root manifest already has a crates.io patch section")
           root.write_text(
               text.rstrip()
               + "\n\n[patch.crates-io]\n"
@@ -70,37 +67,66 @@ jobs:
           )
           PY
           cargo update -p sea-orm-migration@2.0.0 --precise 2.0.0
-          git diff --check
-      - name: Prove the vulnerable archive stack is absent
+      - name: Print exact active feature owners
         shell: bash
         run: |
           set -euo pipefail
           cargo metadata --locked --format-version 1 > /tmp/cargo-metadata.json
-          if jq -e '.packages[] | select(.name == "rkyv" and .version == "0.7.46")' /tmp/cargo-metadata.json >/dev/null; then
-            cargo tree --workspace --locked --invert rkyv@0.7.46 --edges features || true
-            echo "rkyv 0.7.46 remains in the resolved dependency graph" >&2
-            exit 1
-          fi
-          if grep -Fq 'name = "rkyv"' Cargo.lock; then
-            echo "stale rkyv packages remain in Cargo.lock" >&2
-            exit 1
-          fi
-          cargo tree --workspace --locked --edges normal,build,dev > /tmp/dependency-tree.txt
-          ! grep -Fq 'rust_decimal' /tmp/dependency-tree.txt
-      - name: Format
-        run: cargo fmt --all --check
-      - name: Check
-        run: cargo check --workspace --all-targets --locked
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Test
-        run: cargo test --workspace --all-targets --locked
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked --version 0.22.2
-      - name: RustSec audit without an rkyv exception
-        run: cargo audit --deny warnings --ignore RUSTSEC-2026-0173
-      - name: Summarize patch footprint
-        if: always()
-        run: |
-          git status --short
-          git diff --stat
+          echo '=== Cargo feature tree: rust_decimal ==='
+          cargo tree --workspace --locked --invert rust_decimal -e features || true
+          echo '=== Cargo feature tree: rkyv 0.7.46 ==='
+          cargo tree --workspace --locked --invert rkyv@0.7.46 -e features || true
+          echo '=== Cargo feature tree: SeaORM ==='
+          cargo tree --workspace --locked --invert sea-orm@2.0.0 -e features || true
+          echo '=== Metadata reverse graph ==='
+          python3 <<'PY'
+          import json
+          from collections import defaultdict, deque
+
+          with open('/tmp/cargo-metadata.json', encoding='utf-8') as stream:
+              metadata = json.load(stream)
+
+          packages = {package['id']: package for package in metadata['packages']}
+          nodes = {node['id']: node for node in metadata['resolve']['nodes']}
+          reverse = defaultdict(list)
+          for parent_id, node in nodes.items():
+              for dependency in node.get('dependencies', []):
+                  reverse[dependency].append(parent_id)
+
+          interesting_names = {
+              'rkyv', 'rust_decimal', 'sea-orm', 'sea-orm-migration',
+              'sea-query', 'sea-query-sqlx', 'sea-query-binder', 'sea-orm-cli',
+              'sqlx', 'sqlx-core', 'sqlx-postgres', 'sqlx-sqlite',
+          }
+          for package_id, package in sorted(packages.items(), key=lambda item: (item[1]['name'], item[1]['version'])):
+              if package['name'] in interesting_names and package_id in nodes:
+                  print(f"NODE {package['name']} {package['version']}")
+                  print('  features=' + ','.join(nodes[package_id].get('features', [])))
+                  for parent_id in reverse.get(package_id, []):
+                      parent = packages[parent_id]
+                      print(
+                          f"  parent={parent['name']} {parent['version']} "
+                          f"features={','.join(nodes[parent_id].get('features', []))}"
+                      )
+
+          targets = [
+              package_id for package_id, package in packages.items()
+              if package['name'] == 'rust_decimal'
+          ]
+          for target in targets:
+              print(f"REVERSE PATHS TO {packages[target]['name']} {packages[target]['version']}")
+              queue = deque([(target, [target])])
+              seen = {target}
+              while queue:
+                  current, path = queue.popleft()
+                  parents = reverse.get(current, [])
+                  if not parents:
+                      labels = [f"{packages[item]['name']} {packages[item]['version']}" for item in reversed(path)]
+                      print('  ' + ' -> '.join(labels))
+                  for parent in parents:
+                      if parent not in seen:
+                          seen.add(parent)
+                          queue.append((parent, path + [parent]))
+          PY
+          echo '=== Resolved package feature declarations ==='
+          jq -r '.packages[] | select(.name == "sea-orm" or .name == "sea-orm-migration" or .name == "sea-query" or .name == "sea-query-sqlx" or .name == "rust_decimal") | "PACKAGE \(.name) \(.version)\n" + (.features | to_entries | map("  \(.key)=\(.value|join(","))") | join("\n"))' /tmp/cargo-metadata.json
