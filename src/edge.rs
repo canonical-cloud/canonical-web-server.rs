@@ -3,7 +3,7 @@ use axum::{
     http::{request::Parts, HeaderMap, Method, Uri},
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use uuid::Uuid;
 
@@ -58,7 +58,7 @@ pub(crate) fn signed_headers(
         &identity.user_id.to_string(),
         &identity.email,
     );
-    let mut mac = <HmacSha256 as Mac>::new_from_slice(secret).map_err(|_| AppError::Crypto)?;
+    let mut mac = <HmacSha256 as KeyInit>::new_from_slice(secret).map_err(|_| AppError::Crypto)?;
     mac.update(payload.as_bytes());
     let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
     let mut headers = HeaderMap::new();
@@ -116,8 +116,7 @@ fn verify_assertion(
         .map(|value| value.as_str())
         .unwrap_or(uri.path());
     let payload = assertion_payload(method.as_str(), path_and_query, issued_at, &user, &email);
-    let mut mac =
-        <HmacSha256 as Mac>::new_from_slice(secret).map_err(|_| AppError::Crypto)?;
+    let mut mac = <HmacSha256 as KeyInit>::new_from_slice(secret).map_err(|_| AppError::Crypto)?;
     mac.update(payload.as_bytes());
     mac.verify_slice(&signature)
         .map_err(|_| AppError::Unauthorized)?;
