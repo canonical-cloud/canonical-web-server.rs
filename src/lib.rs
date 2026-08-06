@@ -5,6 +5,7 @@ pub mod app;
 pub mod auth;
 pub mod command;
 pub mod database;
+pub mod edge;
 pub mod error;
 pub mod metrics;
 pub mod routes;
