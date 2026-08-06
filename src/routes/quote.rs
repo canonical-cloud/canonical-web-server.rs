@@ -190,11 +190,7 @@ impl QuoteForm {
         }
         if !matches!(
             self.target_timeline.as_str(),
-            "under_3_months"
-                | "3_to_6_months"
-                | "6_to_12_months"
-                | "over_12_months"
-                | "unsure"
+            "under_3_months" | "3_to_6_months" | "6_to_12_months" | "over_12_months" | "unsure"
         ) {
             return Err(AppError::BadRequest(
                 "choose a supported target timeline".into(),
