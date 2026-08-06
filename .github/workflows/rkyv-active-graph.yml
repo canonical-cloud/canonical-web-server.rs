@@ -28,7 +28,7 @@ jobs:
         with:
           toolchain: "1.95.0"
 
-      - name: Reject active vulnerable rkyv 0.7 graph
+      - name: Reject reachable vulnerable rkyv 0.7 graphs
         shell: bash
         run: |
           set -euo pipefail
@@ -37,19 +37,35 @@ jobs:
             exit 0
           fi
 
-          set +e
-          graph="$(cargo tree --workspace --invert rkyv 2>&1)"
-          status=$?
-          set -e
-          printf '%s\n' "$graph"
+          check_graph() {
+            local label="$1"
+            shift
+            local graph status
 
-          if [ "$status" -eq 0 ]; then
-            echo 'rkyv is reachable from the active workspace dependency graph' >&2
-            exit 1
-          fi
-          if ! grep -Fq 'did not match any packages' <<<"$graph"; then
-            echo "cargo tree failed unexpectedly with status $status" >&2
-            exit "$status"
-          fi
+            set +e
+            graph="$(cargo tree --workspace "$@" \
+              --invert rkyv@0.7.46 \
+              --edges normal,build,dev 2>&1)"
+            status=$?
+            set -e
 
-          echo 'verified: rkyv is lockfile-only and absent from the active workspace graph'
+            printf '\n===== %s =====\n%s\n' "$label" "$graph"
+            if [ "$status" -ne 0 ]; then
+              echo "cargo tree failed unexpectedly for ${label} with status ${status}" >&2
+              exit "$status"
+            fi
+            if grep -Eq '^rkyv v0\.7\.46([[:space:]]|$)' <<<"$graph"; then
+              echo "rkyv 0.7.46 is reachable in the ${label} dependency graph" >&2
+              exit 1
+            fi
+            if ! grep -Fq 'nothing to print' <<<"$graph" \
+              && ! grep -Fq 'did not match any packages' <<<"$graph"; then
+              echo "could not prove rkyv 0.7.46 is unreachable in ${label}" >&2
+              exit 1
+            fi
+            echo "verified: rkyv 0.7.46 is unreachable in ${label}"
+          }
+
+          check_graph default
+          check_graph all-targets --target all
+          check_graph all-features-all-targets --all-features --target all
