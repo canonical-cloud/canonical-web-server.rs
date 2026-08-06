@@ -121,16 +121,25 @@ fn runtime_side_effects_keep_explicit_owners() {
         "telemetry::init",
         &["src/bin/canonical-api-server.rs", "src/main.rs"],
     );
+    assert_exact_owners(
+        "Config::from_env",
+        &["src/bin/canonical-api-server.rs", "src/command.rs"],
+    );
+    assert_exact_owners(
+        "app::build_state",
+        &["src/api_server.rs", "src/server.rs"],
+    );
+    assert_exact_owners(
+        "SocketAddr::from(([0, 0, 0, 0], port))",
+        &["src/api_server.rs", "src/server.rs"],
+    );
 
     for (marker, owner) in [
-        ("Config::from_env", "src/command.rs"),
         ("MigrationConfig::from_env", "src/command.rs"),
         ("crate::db::connect_database", "src/database.rs"),
         ("Migrator::up", "src/database.rs"),
         ("database::connect", "src/app.rs"),
-        ("app::build_state", "src/server.rs"),
         ("app::build_app", "src/server.rs"),
-        ("SocketAddr::from(([0, 0, 0, 0], port))", "src/server.rs"),
         ("with_graceful_shutdown(shutdown_signal())", "src/server.rs"),
     ] {
         assert_single_owner(marker, owner);
