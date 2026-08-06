@@ -308,24 +308,20 @@ pub fn quote_page(email: &str) -> Markup {
                     hx-indicator="#quote-progress" {
                     h2 { "Company" }
                     label { "Company name" input name="company_name" required maxlength="200"; }
-                    label { "Company size"
-                        select name="company_size" required {
-                            option value="" { "Choose a range" }
-                            option value="1-10" { "1–10 people" }
-                            option value="11-50" { "11–50 people" }
-                            option value="51-200" { "51–200 people" }
-                            option value="201-1000" { "201–1,000 people" }
-                            option value="1000+" { "More than 1,000 people" }
-                        }
-                    }
                     label { "Industry" input name="industry" required maxlength="120"; }
+                    label { "Number of employees"
+                        input type="number" name="employee_count" min="1" max="1000000" required;
+                    }
+                    label { "Annual revenue in USD (optional)"
+                        input type="number" name="annual_revenue_usd" min="0" max="10000000000000";
+                    }
 
                     h2 { "Frameworks" }
                     p class="muted" { "Choose every framework you want included." }
                     div class="framework-grid" {
                         label { input type="checkbox" name="soc2"; "SOC 2" }
                         label { input type="checkbox" name="nist_csf"; "NIST CSF" }
-                        label { input type="checkbox" name="nist_800_53"; "NIST 800-53" }
+                        label { input type="checkbox" name="nist_800_53"; "NIST SP 800-53" }
                         label { input type="checkbox" name="hipaa"; "HIPAA" }
                         label { input type="checkbox" name="iso_27001"; "ISO 27001" }
                         label { input type="checkbox" name="pci_dss"; "PCI DSS" }
@@ -333,30 +329,35 @@ pub fn quote_page(email: &str) -> Markup {
                     }
 
                     h2 { "Scope" }
-                    label { "Current compliance stage"
-                        select name="current_stage" required {
+                    label { "Security program maturity"
+                        select name="security_program_maturity" required {
                             option value="" { "Choose a stage" }
-                            option value="Starting from scratch" { "Starting from scratch" }
-                            option value="Some controls documented" { "Some controls documented" }
-                            option value="Preparing for an audit" { "Preparing for an audit" }
-                            option value="Maintaining an existing program" { "Maintaining an existing program" }
+                            option value="none" { "Starting from scratch" }
+                            option value="informal" { "Informal practices" }
+                            option value="documented" { "Controls documented" }
+                            option value="managed" { "Managed program" }
+                            option value="audited" { "Previously audited" }
                         }
                     }
                     label { "Target timeline"
                         select name="target_timeline" required {
                             option value="" { "Choose a timeline" }
-                            option value="Within 30 days" { "Within 30 days" }
-                            option value="This quarter" { "This quarter" }
-                            option value="Within 6 months" { "Within 6 months" }
-                            option value="This year" { "This year" }
-                            option value="Still exploring" { "Still exploring" }
+                            option value="under_3_months" { "Under 3 months" }
+                            option value="3_to_6_months" { "3–6 months" }
+                            option value="6_to_12_months" { "6–12 months" }
+                            option value="over_12_months" { "More than 12 months" }
+                            option value="unsure" { "Still exploring" }
                         }
                     }
-                    label { "Sensitive data types (comma-separated)"
-                        input name="data_types" maxlength="960" placeholder="Customer PII, PHI, payment data";
+                    div class="framework-grid" {
+                        label { input type="checkbox" name="handles_phi"; "Handles protected health information" }
+                        label { input type="checkbox" name="handles_payment_cards"; "Handles payment-card data" }
                     }
                     label { "Cloud and hosting providers (comma-separated)"
-                        input name="cloud_providers" maxlength="960" placeholder="AWS, GCP, Azure, Cloudflare";
+                        input name="cloud_providers" maxlength="640" placeholder="AWS, GCP, Azure, Cloudflare";
+                    }
+                    label { "Existing certifications (comma-separated)"
+                        input name="existing_certifications" maxlength="1920" placeholder="ISO 27001, SOC 2 Type II";
                     }
                     label { "Anything else we should know"
                         textarea name="notes" rows="5" maxlength="4000" {}
@@ -373,58 +374,58 @@ pub fn quote_page(email: &str) -> Markup {
 }
 
 pub fn quote_result(quote: &Value) -> Markup {
-    let analysis = quote.get("analysis").unwrap_or(&Value::Null);
-    let minimum = analysis
-        .get("estimated_min_usd")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
-    let maximum = analysis
-        .get("estimated_max_usd")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
-    let weeks = analysis
-        .get("estimated_weeks")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
-    let summary = analysis
-        .get("summary")
+    let id = quote.get("id").and_then(Value::as_str).unwrap_or_default();
+    let status = quote
+        .get("status")
         .and_then(Value::as_str)
-        .unwrap_or("Your quote is ready.");
-    let assumptions = analysis
-        .get("assumptions")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let next_steps = analysis
-        .get("next_steps")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+        .unwrap_or("queued");
+
+    if matches!(status, "queued" | "analyzing") {
+        return html! {
+            article id="quote-result" class="card"
+                hx-get={ "/u/quote/" (id) }
+                hx-trigger="every 2s"
+                hx-swap="outerHTML" {
+                h2 { "Building your preliminary quote" }
+                p { "Your answers were saved securely. Canonical's analysis is running now." }
+                p class="muted" { "This page will update automatically." }
+            }
+        };
+    }
+
+    if status == "ready" {
+        let estimate = quote.get("estimate").unwrap_or(&Value::Null);
+        let low = estimate.get("low").and_then(Value::as_u64).unwrap_or_default();
+        let high = estimate
+            .get("high")
+            .and_then(Value::as_u64)
+            .unwrap_or_default();
+        let currency = estimate
+            .get("currency")
+            .and_then(Value::as_str)
+            .unwrap_or("USD");
+        let analysis = quote
+            .get("analysisMarkdown")
+            .and_then(Value::as_str)
+            .unwrap_or("Your preliminary quote is ready.");
+
+        return html! {
+            article id="quote-result" class="card" {
+                h2 { "Your preliminary quote" }
+                p class="quote-total" { "$" (low) "–$" (high) " " (currency) }
+                pre style="white-space:pre-wrap;font:inherit" { (analysis) }
+                p class="muted" {
+                    "This estimate is informational and will be confirmed during scoping."
+                }
+            }
+        };
+    }
 
     html! {
-        article class="card" {
-            h2 { "Your preliminary quote" }
-            p class="quote-total" { "$" (minimum) "–$" (maximum) " USD" }
-            p { "Estimated delivery: " (weeks) " weeks" }
-            p { (summary) }
-            @if !assumptions.is_empty() {
-                h3 { "Assumptions" }
-                ul {
-                    @for assumption in assumptions {
-                        @if let Some(text) = assumption.as_str() { li { (text) } }
-                    }
-                }
-            }
-            @if !next_steps.is_empty() {
-                h3 { "Recommended next steps" }
-                ol {
-                    @for step in next_steps {
-                        @if let Some(text) = step.as_str() { li { (text) } }
-                    }
-                }
-            }
-            p class="muted" {
-                "This estimate is informational and will be confirmed during scoping."
+        article id="quote-result" class="card" {
+            h2 { "We could not finish this quote" }
+            p class="error" role="alert" {
+                "No charge was made. Please review your answers and try again, or contact Canonical."
             }
         }
     }
