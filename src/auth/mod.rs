@@ -1,3 +1,4 @@
+mod edge;
 mod extractor;
 mod rate_limit;
 #[cfg(feature = "test-auth")]
@@ -8,6 +9,7 @@ pub use canonical_auth::{
     CredentialSource, SupabaseAuth, SupabaseAuthBuildError, SupabaseUser,
 };
 pub use canonical_session::{CreatedSession, SessionService};
+pub use edge::{EdgeAuthVerifier, EdgeAuthenticated, EdgeIdentity};
 pub use extractor::{
     require_csrf, require_origin, Authenticated, OptionalAuthenticated, SessionAuthenticated,
 };
