@@ -76,7 +76,7 @@ jobs:
               r"break;\s*\}\s*\}"
           )
           replacement = """Some(Ok(Message::Ping(payload)))
-                      if outgoing.send(Message::Pong(payload)).await.is_err() =>
+                      if outgoing.send(Message::Pong(payload.clone())).await.is_err() =>
                   {
                       break;
                   }"""
@@ -88,6 +88,9 @@ jobs:
 
       - name: Regenerate lockfile without orphan packages
         run: cargo generate-lockfile
+
+      - name: Explain rkyv reverse dependency
+        run: cargo tree --target all -i rkyv || true
 
       - name: Format
         run: cargo fmt --all
@@ -106,7 +109,7 @@ jobs:
           git diff --check
           if grep -q 'name = "rkyv"' Cargo.lock; then
             echo "rkyv remains in Cargo.lock" >&2
-            cargo tree --locked --target all -i rkyv || true
+            cargo tree --target all -i rkyv || true
             exit 1
           fi
           git diff --stat
