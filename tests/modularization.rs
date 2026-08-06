@@ -125,10 +125,7 @@ fn runtime_side_effects_keep_explicit_owners() {
         "Config::from_env",
         &["src/bin/canonical-api-server.rs", "src/command.rs"],
     );
-    assert_exact_owners(
-        "app::build_state",
-        &["src/api_server.rs", "src/server.rs"],
-    );
+    assert_exact_owners("app::build_state", &["src/api_server.rs", "src/server.rs"]);
     assert_exact_owners(
         "SocketAddr::from(([0, 0, 0, 0], port))",
         &["src/api_server.rs", "src/server.rs"],
