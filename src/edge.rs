@@ -58,8 +58,7 @@ pub(crate) fn signed_headers(
         &identity.user_id.to_string(),
         &identity.email,
     );
-    let mut mac =
-        <HmacSha256 as Mac>::new_from_slice(secret).map_err(|_| AppError::Crypto)?;
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(secret).map_err(|_| AppError::Crypto)?;
     mac.update(payload.as_bytes());
     let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
     let mut headers = HeaderMap::new();
@@ -116,13 +115,7 @@ fn verify_assertion(
         .path_and_query()
         .map(|value| value.as_str())
         .unwrap_or(uri.path());
-    let payload = assertion_payload(
-        method.as_str(),
-        path_and_query,
-        issued_at,
-        &user,
-        &email,
-    );
+    let payload = assertion_payload(method.as_str(), path_and_query, issued_at, &user, &email);
     let mut mac =
         <HmacSha256 as Mac>::new_from_slice(secret).map_err(|_| AppError::Crypto)?;
     mac.update(payload.as_bytes());
@@ -166,13 +159,7 @@ fn optional_header_string(
     }
 }
 
-fn assertion_payload(
-    method: &str,
-    path: &str,
-    issued_at: i64,
-    user: &str,
-    email: &str,
-) -> String {
+fn assertion_payload(method: &str, path: &str, issued_at: i64, user: &str, email: &str) -> String {
     format!(
         "{}\n{}\n{}\n{}\n{}",
         method.to_uppercase(),
