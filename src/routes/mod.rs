@@ -1,6 +1,7 @@
 mod auth;
 mod health;
 mod pages;
+mod quote;
 mod websocket;
 
 pub mod api;
@@ -30,9 +31,11 @@ pub fn router(state: AppState) -> Router {
     let private_application = Router::new()
         .route("/login", get(auth::login_page))
         .route("/ws", axum::routing::any(websocket::upgrade))
+        .nest("/ws/quotes", quote::websocket_router())
         .nest("/api", api::router())
         .nest("/auth", auth::router())
         .nest("/app", pages::router())
+        .nest("/u/quote", quote::web_router())
         // These responses can contain identity, CSRF tokens, or customer
         // records. Keep them out of browser and shared intermediary caches;
         // static application assets and the marketing fallback stay outside
