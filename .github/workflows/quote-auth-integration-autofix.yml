@@ -101,8 +101,23 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-      - name: Test
-        run: cargo test --workspace --all-features
+      - name: Test with annotated failure output
+        shell: bash
+        run: |
+          set +e
+          cargo test --workspace --all-features --no-fail-fast -- --nocapture 2>&1 | tee /tmp/cargo-test.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            python3 <<'PY'
+          from pathlib import Path
+          log = Path('/tmp/cargo-test.log').read_text(errors='replace')
+          tail = log[-15000:]
+          escaped = tail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print(f'::error title=Cargo test failure::{escaped}')
+          PY
+            exit "$status"
+          fi
 
       - name: Verify patch
         run: |
