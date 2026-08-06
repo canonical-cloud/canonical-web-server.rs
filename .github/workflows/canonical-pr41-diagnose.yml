@@ -1,0 +1,83 @@
+name: Diagnose Canonical PR 41 exact head
+
+on:
+  push:
+    branches:
+      - ci/canonical-pr41-diagnose
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      TARGET_BRANCH: feat/canonical-plus-quote-platform-release
+      EXPECTED_HEAD: 13d905618493c855692b184a641f6c3548eabfe0
+    steps:
+      - name: Check out helper branch with write credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          show-progress: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: "1.95.0"
+          components: rustfmt
+      - name: Apply Clippy fix and one-run dependency diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "$TARGET_BRANCH"
+          remote_head="$(git rev-parse "origin/$TARGET_BRANCH")"
+          if [ "$remote_head" != "$EXPECTED_HEAD" ]; then
+            echo "release branch moved from expected exact head: $remote_head" >&2
+            exit 1
+          fi
+          git checkout -B "$TARGET_BRANCH" "$EXPECTED_HEAD"
+          python3 <<'PY'
+          from pathlib import Path
+
+          quotes = Path("src/quotes.rs")
+          text = quotes.read_text()
+          old = '''                    Some(Ok(Message::Ping(payload))) => {
+                              if outgoing.send(Message::Pong(payload)).await.is_err() {
+                                  break;
+                              }
+                          }
+          '''
+          old = "\n".join(line[20:] if line.startswith("                    ") else line for line in old.splitlines()) + "\n"
+          new = '''                    Some(Ok(Message::Ping(payload)))
+                              if outgoing.send(Message::Pong(payload)).await.is_err() =>
+                          {
+                              break;
+                          }
+          '''
+          new = "\n".join(line[20:] if line.startswith("                    ") else line for line in new.splitlines()) + "\n"
+          if old not in text:
+              raise SystemExit("expected WebSocket Ping arm was not found")
+          quotes.write_text(text.replace(old, new, 1))
+
+          workflow = Path(".github/workflows/ci.yml")
+          text = workflow.read_text()
+          marker = "          cargo metadata --locked --format-version 1 > /tmp/cargo-metadata.json\n"
+          diagnostic = '''          echo "Resolved dependency path to rkyv 0.7.46:"
+                    cargo tree --workspace --locked --invert rkyv@0.7.46 --edges normal,build,dev || true
+          '''
+          diagnostic = "\n".join(line[10:] if line.startswith("          ") else line for line in diagnostic.splitlines()) + "\n"
+          if diagnostic not in text:
+              if marker not in text:
+                  raise SystemExit("rkyv metadata guard marker was not found")
+              text = text.replace(marker, diagnostic + marker, 1)
+          workflow.write_text(text)
+          PY
+          cargo fmt --all
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/quotes.rs .github/workflows/ci.yml
+          git commit -m "fix: satisfy quote Clippy and expose rkyv path"
+          git push origin "HEAD:$TARGET_BRANCH"
