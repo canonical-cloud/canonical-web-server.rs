@@ -31,6 +31,7 @@ jobs:
         shell: bash
         run: |
           python3 <<'PY'
+          import re
           from pathlib import Path
 
           schema = Path("deploy/postgres/schema.sql")
@@ -42,44 +43,47 @@ jobs:
 
           cockroach = Path("tests/cockroach_rls.rs")
           text = cockroach.read_text()
-          old_assert = '''    assert_eq!(
-              policy_count, 8,
-              "expected seven owner policies plus the web-session process boundary"
-          );'''
-          new_assert = '''    assert_eq!(
-              policy_count, 10,
-              "expected owner/process policies plus quote-owner and context-read boundaries"
-          );'''
-          if old_assert not in text:
-              raise SystemExit("expected Cockroach policy-count assertion was not found")
-          text = text.replace(old_assert, new_assert)
-          old_tables = '''              'engagement_note', 'admin_role_assignment', 'admin_audit_event'
-              , 'web_session' '''
-          new_tables = '''              'engagement_note', 'admin_role_assignment', 'admin_audit_event',
-              'web_session', 'canonical_context', 'compliance_quote' '''
-          if old_tables not in text:
-              raise SystemExit("expected Cockroach forced-RLS table list was not found")
-          cockroach.write_text(text.replace(old_tables, new_tables))
+          text, policy_count_changes = re.subn(
+              r"policy_count,\s*8,",
+              "policy_count, 10,",
+              text,
+              count=1,
+          )
+          if policy_count_changes != 1:
+              raise SystemExit("expected Cockroach policy-count value was not found")
+          old_message = "expected seven owner policies plus the web-session process boundary"
+          if text.count(old_message) != 1:
+              raise SystemExit("expected Cockroach policy-count message was not found")
+          text = text.replace(
+              old_message,
+              "expected owner/process policies plus quote-owner and context-read boundaries",
+          )
+          text, rls_table_changes = re.subn(
+              r"(,\s*'web_session')(\s*\n\s*\))",
+              r"\1, 'canonical_context', 'compliance_quote'\2",
+              text,
+              count=1,
+          )
+          if rls_table_changes != 1:
+              raise SystemExit("expected Cockroach forced-RLS web_session entry was not found")
+          cockroach.write_text(text)
 
           quotes = Path("src/quotes.rs")
           text = quotes.read_text()
-          old_ping = '''                    Some(Ok(Message::Ping(payload))) => {
-                          if outgoing.send(Message::Pong(payload)).await.is_err() {
-                              break;
-                          }
-                      }
-                      Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
-                      _ => {}'''
-          new_ping = '''                    Some(Ok(Message::Ping(payload)))
-                          if outgoing.send(Message::Pong(payload)).await.is_err() =>
-                      {
-                          break;
-                      }
-                      Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
-                      _ => {}'''
-          if old_ping not in text:
+          ping_pattern = re.compile(
+              r"Some\(Ok\(Message::Ping\(payload\)\)\)\s*=>\s*\{\s*"
+              r"if outgoing\.send\(Message::Pong\(payload\)\)\.await\.is_err\(\)\s*\{\s*"
+              r"break;\s*\}\s*\}"
+          )
+          replacement = """Some(Ok(Message::Ping(payload)))
+                      if outgoing.send(Message::Pong(payload)).await.is_err() =>
+                  {
+                      break;
+                  }"""
+          text, ping_changes = ping_pattern.subn(replacement, text, count=1)
+          if ping_changes != 1:
               raise SystemExit("expected WebSocket ping match was not found")
-          quotes.write_text(text.replace(old_ping, new_ping))
+          quotes.write_text(text)
           PY
 
       - name: Regenerate lockfile without orphan packages
