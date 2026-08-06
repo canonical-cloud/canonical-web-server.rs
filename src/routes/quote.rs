@@ -79,7 +79,8 @@ pub async fn submit(
     if let Err(error) = require_csrf(&actor, &headers, Some(&form.csrf)) {
         return error.into_response();
     }
-    let request = match form.into_request() {
+    let idempotency_key = form.client_request_id;
+    let request = match form.into_request(&actor) {
         Ok(request) => request,
         Err(AppError::BadRequest(message)) => return form_error(&headers, &message),
         Err(error) => return error.into_response(),
@@ -87,7 +88,7 @@ pub async fn submit(
     let Some(client) = state.quote_api.as_ref() else {
         return AppError::ServiceUpstream.into_response();
     };
-    match client.create(&actor, &request).await {
+    match client.create(&actor, &request, idempotency_key).await {
         Ok(record) if headers.contains_key("hx-request") => {
             quote_api::quote_status_fragment(&record).into_response()
         }
@@ -100,23 +101,25 @@ pub async fn submit(
 #[derive(Debug, Deserialize)]
 pub struct QuoteForm {
     csrf: String,
+    client_request_id: Uuid,
     company_name: String,
-    industry: String,
+    contact_name: String,
+    #[serde(default)]
+    website: String,
     employee_count: u32,
     #[serde(default)]
-    annual_revenue_usd: String,
-    security_program_maturity: String,
-    target_timeline: String,
+    annual_revenue_band: String,
+    current_stage: String,
     #[serde(default)]
-    cloud_providers: String,
+    target_date: String,
     #[serde(default)]
-    existing_certifications: String,
+    infrastructure: String,
     #[serde(default)]
     notes: String,
     #[serde(default)]
-    soc2: Option<String>,
+    soc2_type_2: Option<String>,
     #[serde(default)]
-    nist_csf: Option<String>,
+    nist_csf_2: Option<String>,
     #[serde(default)]
     nist_800_53: Option<String>,
     #[serde(default)]
@@ -126,25 +129,39 @@ pub struct QuoteForm {
     #[serde(default)]
     fedramp: Option<String>,
     #[serde(default)]
-    pci_dss: Option<String>,
+    pci_dss_4: Option<String>,
     #[serde(default)]
-    handles_phi: Option<String>,
+    data_pii: Option<String>,
     #[serde(default)]
-    handles_payment_cards: Option<String>,
+    data_phi: Option<String>,
+    #[serde(default)]
+    data_payment_cards: Option<String>,
+    #[serde(default)]
+    data_confidential: Option<String>,
+    #[serde(default)]
+    has_security_program: Option<String>,
+    #[serde(default)]
+    has_policies: Option<String>,
+    #[serde(default)]
+    has_risk_assessment: Option<String>,
+    #[serde(default)]
+    has_incident_response_plan: Option<String>,
+    #[serde(default)]
+    has_vendor_management: Option<String>,
 }
 
 impl QuoteForm {
-    fn into_request(self) -> Result<QuoteRequest, AppError> {
+    fn into_request(self, actor: &canonical_auth::AuthContext) -> Result<QuoteRequest, AppError> {
         let company_name = self.company_name.trim().to_owned();
         if company_name.is_empty() || company_name.chars().count() > 200 {
             return Err(AppError::BadRequest(
                 "company name is required and must be at most 200 characters".into(),
             ));
         }
-        let industry = self.industry.trim().to_owned();
-        if industry.is_empty() || industry.chars().count() > 120 {
+        let contact_name = self.contact_name.trim().to_owned();
+        if contact_name.is_empty() || contact_name.chars().count() > 200 {
             return Err(AppError::BadRequest(
-                "industry is required and must be at most 120 characters".into(),
+                "contact name is required and must be at most 200 characters".into(),
             ));
         }
         if !(1..=1_000_000).contains(&self.employee_count) {
@@ -152,25 +169,25 @@ impl QuoteForm {
                 "employee count must be between 1 and 1000000".into(),
             ));
         }
-        let annual_revenue_usd = match self.annual_revenue_usd.trim() {
-            "" => None,
-            value => Some(value.parse::<u64>().map_err(|_| {
-                AppError::BadRequest("annual revenue must be a whole USD amount".into())
-            })?),
-        };
-        if annual_revenue_usd.is_some_and(|value| value > 10_000_000_000_000) {
+        let annual_revenue_band = optional(self.annual_revenue_band);
+        if annual_revenue_band.as_deref().is_some_and(|value| {
+            !matches!(
+                value,
+                "under_1m" | "1m_to_10m" | "10m_to_100m" | "100m_plus"
+            )
+        }) {
             return Err(AppError::BadRequest(
-                "annual revenue is outside the supported range".into(),
+                "choose a supported annual revenue band".into(),
             ));
         }
         let frameworks = [
-            ("soc2", self.soc2),
-            ("nist_csf", self.nist_csf),
+            ("soc2_type_2", self.soc2_type_2),
+            ("nist_csf_2", self.nist_csf_2),
             ("nist_800_53", self.nist_800_53),
             ("hipaa", self.hipaa),
             ("iso_27001", self.iso_27001),
             ("fedramp", self.fedramp),
-            ("pci_dss", self.pci_dss),
+            ("pci_dss_4", self.pci_dss_4),
         ]
         .into_iter()
         .filter_map(|(name, selected)| selected.map(|_| name.to_owned()))
@@ -181,19 +198,51 @@ impl QuoteForm {
             ));
         }
         if !matches!(
-            self.security_program_maturity.as_str(),
+            self.current_stage.as_str(),
             "none" | "informal" | "documented" | "managed" | "audited"
         ) {
             return Err(AppError::BadRequest(
                 "choose a supported security program maturity".into(),
             ));
         }
-        if !matches!(
-            self.target_timeline.as_str(),
-            "under_3_months" | "3_to_6_months" | "6_to_12_months" | "over_12_months" | "unsure"
-        ) {
+        let target_date = optional(self.target_date);
+        if target_date
+            .as_deref()
+            .is_some_and(|value| !is_iso_date(value))
+        {
             return Err(AppError::BadRequest(
-                "choose a supported target timeline".into(),
+                "target date must use YYYY-MM-DD".into(),
+            ));
+        }
+        let infrastructure = split_list(&self.infrastructure, 16, 80);
+        if infrastructure.is_empty() {
+            return Err(AppError::BadRequest(
+                "list at least one infrastructure provider or platform".into(),
+            ));
+        }
+        let data_sensitivity = [
+            ("pii", self.data_pii),
+            ("phi", self.data_phi),
+            ("payment_card", self.data_payment_cards),
+            ("confidential", self.data_confidential),
+        ]
+        .into_iter()
+        .filter_map(|(name, selected)| selected.map(|_| name.to_owned()))
+        .collect::<Vec<_>>();
+        if data_sensitivity.is_empty() {
+            return Err(AppError::BadRequest(
+                "choose at least one data sensitivity category".into(),
+            ));
+        }
+        let website = optional(self.website);
+        if website.as_deref().is_some_and(|value| {
+            value.len() > 2_048
+                || reqwest::Url::parse(value).map_or(true, |url| {
+                    !matches!(url.scheme(), "http" | "https") || url.host_str().is_none()
+                })
+        }) {
+            return Err(AppError::BadRequest(
+                "website must be an absolute HTTP or HTTPS URL".into(),
             ));
         }
         let notes = optional(self.notes);
@@ -204,20 +253,38 @@ impl QuoteForm {
         }
 
         Ok(QuoteRequest {
-            company_name,
-            industry,
-            employee_count: self.employee_count,
-            annual_revenue_usd,
+            organization_name: company_name,
+            contact_name,
+            contact_email: actor.email.clone(),
+            website,
+            employee_count: i64::from(self.employee_count),
+            annual_revenue_band,
             frameworks,
-            cloud_providers: split_list(&self.cloud_providers, 8, 80),
-            handles_phi: self.handles_phi.is_some(),
-            handles_payment_cards: self.handles_payment_cards.is_some(),
-            security_program_maturity: self.security_program_maturity,
-            target_timeline: self.target_timeline,
-            existing_certifications: split_list(&self.existing_certifications, 16, 120),
+            current_stage: self.current_stage,
+            infrastructure,
+            data_sensitivity,
+            target_date,
+            has_security_program: self.has_security_program.is_some(),
+            has_policies: self.has_policies.is_some(),
+            has_risk_assessment: self.has_risk_assessment.is_some(),
+            has_incident_response_plan: self.has_incident_response_plan.is_some(),
+            has_vendor_management: self.has_vendor_management.is_some(),
             notes,
+            context_key: None,
+            answers_version: 1,
         })
     }
+}
+
+fn is_iso_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit())
 }
 
 fn split_list(value: &str, maximum_entries: usize, maximum_length: usize) -> Vec<String> {
@@ -273,6 +340,9 @@ fn form_error(headers: &HeaderMap, message: &str) -> Response {
             .headers_mut()
             .insert("hx-retarget", HeaderValue::from_static("#quote-results"));
         response
+            .headers_mut()
+            .insert("hx-reswap", HeaderValue::from_static("afterbegin"));
+        response
     } else {
         (StatusCode::UNPROCESSABLE_ENTITY, fragment).into_response()
     }
@@ -286,29 +356,48 @@ mod tests {
     fn form_maps_selected_frameworks_and_scope() {
         let form = QuoteForm {
             csrf: "csrf".into(),
+            client_request_id: Uuid::new_v4(),
             company_name: "Example".into(),
-            industry: "Software".into(),
+            contact_name: "Casey Example".into(),
+            website: "https://example.com".into(),
             employee_count: 15,
-            annual_revenue_usd: "1000000".into(),
-            security_program_maturity: "documented".into(),
-            target_timeline: "3_to_6_months".into(),
-            cloud_providers: "AWS, Cloudflare".into(),
-            existing_certifications: String::new(),
+            annual_revenue_band: "1m_to_10m".into(),
+            current_stage: "documented".into(),
+            target_date: "2027-01-15".into(),
+            infrastructure: "AWS, Cloudflare".into(),
             notes: String::new(),
-            soc2: Some("on".into()),
-            nist_csf: None,
+            soc2_type_2: Some("on".into()),
+            nist_csf_2: None,
             nist_800_53: None,
             hipaa: Some("on".into()),
             iso_27001: None,
             fedramp: None,
-            pci_dss: None,
-            handles_phi: Some("on".into()),
-            handles_payment_cards: None,
+            pci_dss_4: None,
+            data_pii: None,
+            data_phi: Some("on".into()),
+            data_payment_cards: None,
+            data_confidential: None,
+            has_security_program: Some("on".into()),
+            has_policies: Some("on".into()),
+            has_risk_assessment: None,
+            has_incident_response_plan: Some("on".into()),
+            has_vendor_management: None,
         };
-        let request = form.into_request().unwrap();
-        assert_eq!(request.frameworks, ["soc2", "hipaa"]);
-        assert_eq!(request.cloud_providers, ["AWS", "Cloudflare"]);
-        assert!(request.handles_phi);
+        let actor = canonical_auth::AuthContext {
+            user_id: Uuid::new_v4(),
+            email: "casey@example.com".into(),
+            source: canonical_auth::CredentialSource::SessionCookie,
+            supabase_session_id: None,
+            session_hash: None,
+            csrf_token: Some("csrf".into()),
+            expires_at: chrono::Utc::now(),
+        };
+        let request = form.into_request(&actor).unwrap();
+        assert_eq!(request.frameworks, ["soc2_type_2", "hipaa"]);
+        assert_eq!(request.infrastructure, ["AWS", "Cloudflare"]);
+        assert_eq!(request.data_sensitivity, ["phi"]);
+        assert_eq!(request.contact_email, "casey@example.com");
+        assert!(request.has_security_program);
     }
 
     #[test]
