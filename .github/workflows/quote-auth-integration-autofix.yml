@@ -1,0 +1,121 @@
+name: Quote auth integration branch autofix
+
+on:
+  push:
+    branches:
+      - feat/canonical-plus-quote-platform
+
+permissions:
+  contents: write
+
+concurrency:
+  group: quote-auth-integration-autofix-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  autofix:
+    if: ${{ !contains(github.event.head_commit.message, '[quote-auth-autofix]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: feat/canonical-plus-quote-platform
+          persist-credentials: true
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt,clippy
+
+      - name: Apply deterministic integration repairs
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          schema = Path("deploy/postgres/schema.sql")
+          text = schema.read_text()
+          old = "owner_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,"
+          if text.count(old) != 1:
+              raise SystemExit(f"expected one quote owner FK in declarative schema, found {text.count(old)}")
+          schema.write_text(text.replace(old, "owner_id uuid NOT NULL,"))
+
+          cockroach = Path("tests/cockroach_rls.rs")
+          text = cockroach.read_text()
+          old_assert = '''    assert_eq!(
+              policy_count, 8,
+              "expected seven owner policies plus the web-session process boundary"
+          );'''
+          new_assert = '''    assert_eq!(
+              policy_count, 10,
+              "expected owner/process policies plus quote-owner and context-read boundaries"
+          );'''
+          if old_assert not in text:
+              raise SystemExit("expected Cockroach policy-count assertion was not found")
+          text = text.replace(old_assert, new_assert)
+          old_tables = '''              'engagement_note', 'admin_role_assignment', 'admin_audit_event'
+              , 'web_session' '''
+          new_tables = '''              'engagement_note', 'admin_role_assignment', 'admin_audit_event',
+              'web_session', 'canonical_context', 'compliance_quote' '''
+          if old_tables not in text:
+              raise SystemExit("expected Cockroach forced-RLS table list was not found")
+          cockroach.write_text(text.replace(old_tables, new_tables))
+
+          quotes = Path("src/quotes.rs")
+          text = quotes.read_text()
+          old_ping = '''                    Some(Ok(Message::Ping(payload))) => {
+                          if outgoing.send(Message::Pong(payload)).await.is_err() {
+                              break;
+                          }
+                      }
+                      Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                      _ => {}'''
+          new_ping = '''                    Some(Ok(Message::Ping(payload)))
+                          if outgoing.send(Message::Pong(payload)).await.is_err() =>
+                      {
+                          break;
+                      }
+                      Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                      _ => {}'''
+          if old_ping not in text:
+              raise SystemExit("expected WebSocket ping match was not found")
+          quotes.write_text(text.replace(old_ping, new_ping))
+          PY
+
+      - name: Regenerate lockfile without orphan packages
+        run: cargo generate-lockfile
+
+      - name: Format
+        run: cargo fmt --all
+
+      - name: Check
+        run: cargo check --workspace --all-targets --all-features
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --all-features
+
+      - name: Verify patch
+        run: |
+          git diff --check
+          if grep -q 'name = "rkyv"' Cargo.lock; then
+            echo "rkyv remains in Cargo.lock" >&2
+            cargo tree --locked --target all -i rkyv || true
+            exit 1
+          fi
+          git diff --stat
+
+      - name: Commit deterministic autofix
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock deploy/postgres/schema.sql tests/cockroach_rls.rs src
+          git commit -m "fix: integrate Shared Auth quote identity [quote-auth-autofix]"
+          git push origin HEAD:feat/canonical-plus-quote-platform
