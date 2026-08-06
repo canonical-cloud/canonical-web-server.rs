@@ -94,9 +94,7 @@ impl SharedAuthVerifier {
 
         match response.status() {
             StatusCode::OK => {}
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
-                return Err(AppError::Unauthorized)
-            }
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => return Err(AppError::Unauthorized),
             StatusCode::TOO_MANY_REQUESTS => return Err(AppError::AuthBusy),
             _ => return Err(AppError::AuthUpstream),
         }
@@ -106,9 +104,7 @@ impl SharedAuthVerifier {
             .parse::<Uuid>()
             .map_err(|_| AppError::Unauthorized)?;
         let email = required_header(headers, "x-auth-email")?;
-        if email.is_empty()
-            || email.len() > MAX_EMAIL_BYTES
-            || email.chars().any(char::is_control)
+        if email.is_empty() || email.len() > MAX_EMAIL_BYTES || email.chars().any(char::is_control)
         {
             return Err(AppError::Unauthorized);
         }
@@ -264,7 +260,9 @@ mod tests {
             &Url::parse("http://shared-auth.namespace.svc.cluster.local:8080/auth/verify").unwrap()
         )
         .is_ok());
-        assert!(validate_verify_url(&Url::parse("http://example.com/auth/verify").unwrap()).is_err());
+        assert!(
+            validate_verify_url(&Url::parse("http://example.com/auth/verify").unwrap()).is_err()
+        );
         assert!(validate_verify_url(
             &Url::parse("https://app.canonical.plus/auth/verify?token=secret").unwrap()
         )
