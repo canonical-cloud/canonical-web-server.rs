@@ -31,12 +31,13 @@ impl FromRequestParts<AppState> for EdgeAuthenticated {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
+        let quote = state.quote.as_ref().ok_or(AppError::Unauthorized)?;
         verify_assertion(
             &parts.method,
             &parts.uri,
             &parts.headers,
-            &state.config.origin_assertion_secret,
-            state.config.origin_assertion_max_age_seconds,
+            &quote.origin_assertion_secret,
+            quote.maximum_assertion_age_seconds,
             chrono::Utc::now().timestamp(),
         )
         .map(Self)
