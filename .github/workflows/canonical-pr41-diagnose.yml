@@ -1,4 +1,4 @@
-name: Diagnose Canonical SeaORM decimal feature path
+name: Validate Canonical dependency correction
 
 on:
   push:
@@ -10,12 +10,13 @@ permissions:
   contents: read
 
 jobs:
-  dependency-path:
+  dependency-fix:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 50
     env:
       RELEASE_SHA: 459d18e8248de7802c82b280232977cdf7c517cb
       SEA_ORM_SHA: fd3d3de8a37df4ff790ff1661bb572b9ec1350d0
+      BUILD_TARGET: x86_64-unknown-linux-gnu
     steps:
       - name: Check out immutable release SHA
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -26,9 +27,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
           toolchain: "1.95.0"
+          components: rustfmt,clippy
+          targets: ${{ env.BUILD_TARGET }}
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.8.2
       - name: Assert immutable source head
         run: test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
-      - name: Apply the first migration-default correction
+      - name: Apply minimal upstream migration feature correction
         shell: bash
         run: |
           set -euo pipefail
@@ -37,6 +41,7 @@ jobs:
           test "$(git -C /tmp/sea-orm rev-parse HEAD)" = "$SEA_ORM_SHA"
           mkdir -p vendor
           cp -R /tmp/sea-orm/sea-orm-migration vendor/sea-orm-migration
+          rm -rf vendor/sea-orm-migration/.git
           python3 <<'PY'
           from pathlib import Path
 
@@ -45,7 +50,10 @@ jobs:
           old = '''sea-orm = { version = "~2.0.0", path = "../", features = [
               "schema-sync",
           ] }'''
-          new = '''sea-orm = { version = "~2.0.0", default-features = false, features = [
+          new = '''# Canonical security patch: upstream 2.0.0 enables SeaORM's broad
+          # defaults through this internal edge. Keep only migration-required
+          # schema synchronization and the explicitly forwarded runtime/types.
+          sea-orm = { version = "~2.0.0", default-features = false, features = [
               "schema-sync",
           ] }'''
           if old not in text:
@@ -60,73 +68,128 @@ jobs:
 
           root = Path("Cargo.toml")
           text = root.read_text()
+          if "[patch.crates-io]" in text:
+              raise SystemExit("root manifest already has a crates.io patch section")
           root.write_text(
               text.rstrip()
-              + "\n\n[patch.crates-io]\n"
+              + "\n\n# Remove SeaORM migration's unintended default type/archive graph.\n"
+              + "[patch.crates-io]\n"
               + 'sea-orm-migration = { path = "vendor/sea-orm-migration" }\n'
           )
+
+          test = Path("tests/modularization.rs")
+          text = test.read_text()
+          old = '''    for (marker, owner) in [
+              ("Config::from_env", "src/command.rs"),
+          '''
+          new = '''    // Each independently deployable server binary loads the shared runtime
+              // configuration before entering its own server boundary.
+              assert_exact_owners(
+                  "Config::from_env",
+                  &["src/bin/canonical-api-server.rs", "src/command.rs"],
+              );
+          
+              for (marker, owner) in [
+          '''
+          if old not in text:
+              raise SystemExit("unexpected Config ownership assertion")
+          test.write_text(text.replace(old, new, 1))
+
+          workflow = Path(".github/workflows/ci.yml")
+          text = workflow.read_text()
+          old_start = '''      - name: Assert vulnerable rkyv is not in the resolved build graph
+              shell: bash
+              run: |
+                set -euo pipefail
+                # RUSTSEC-2026-0235 affects rkyv 0.7.46. Cargo-audit scans every
+                # package retained in Cargo.lock, including unreachable historical
+                # resolver entries, so prove absence from Cargo's resolved graph
+                # before applying the narrowly scoped audit ignore below.
+                cargo metadata --locked --format-version 1 > /tmp/cargo-metadata.json
+                python3 <<'PY'
+          '''
+          if old_start not in text:
+              raise SystemExit("existing rkyv guard start was not found")
+          start = text.index(old_start)
+          audit_marker = "      - name: Audit Rust dependencies\n"
+          end = text.index(audit_marker, start)
+          new_guard = '''      - name: Assert vulnerable rkyv is not in the active Linux build graph
+              shell: bash
+              run: |
+                set -euo pipefail
+                # RUSTSEC-2026-0235 affects rkyv 0.7.46. Cargo retains optional
+                # packages in Cargo.lock and metadata even when their activating
+                # feature is disabled. Prove that the production Linux target has
+                # no normal, build, or dev path before the narrow audit exception.
+                active_path="$(cargo tree \\
+                  --workspace \\
+                  --locked \\
+                  --target x86_64-unknown-linux-gnu \\
+                  --invert rkyv@0.7.46 \\
+                  --edges normal,build,dev \\
+                  --prefix none 2>/dev/null || true)"
+                if [ -n "$active_path" ]; then
+                  printf '%s\\n' "$active_path" >&2
+                  echo "vulnerable rkyv entered the active Linux dependency graph" >&2
+                  exit 1
+                fi
+                echo "rkyv 0.7.46 is absent from the active Linux dependency graph"
+          '''
+          text = text[:start] + new_guard + text[end:]
+          text = text.replace(
+              "# the resolved-graph assertion above.",
+              "# the active Linux graph assertion above.",
+              1,
+          )
+          workflow.write_text(text)
           PY
           cargo update -p sea-orm-migration@2.0.0 --precise 2.0.0
-      - name: Print exact active feature owners
+          cargo fmt --all
+          git diff --check
+      - name: Prove vulnerable archive code is inactive
         shell: bash
         run: |
           set -euo pipefail
-          cargo metadata --locked --format-version 1 > /tmp/cargo-metadata.json
-          echo '=== Cargo feature tree: rust_decimal ==='
-          cargo tree --workspace --locked --invert rust_decimal -e features || true
-          echo '=== Cargo feature tree: rkyv 0.7.46 ==='
-          cargo tree --workspace --locked --invert rkyv@0.7.46 -e features || true
-          echo '=== Cargo feature tree: SeaORM ==='
-          cargo tree --workspace --locked --invert sea-orm@2.0.0 -e features || true
-          echo '=== Metadata reverse graph ==='
-          python3 <<'PY'
-          import json
-          from collections import defaultdict, deque
-
-          with open('/tmp/cargo-metadata.json', encoding='utf-8') as stream:
-              metadata = json.load(stream)
-
-          packages = {package['id']: package for package in metadata['packages']}
-          nodes = {node['id']: node for node in metadata['resolve']['nodes']}
-          reverse = defaultdict(list)
-          for parent_id, node in nodes.items():
-              for dependency in node.get('dependencies', []):
-                  reverse[dependency].append(parent_id)
-
-          interesting_names = {
-              'rkyv', 'rust_decimal', 'sea-orm', 'sea-orm-migration',
-              'sea-query', 'sea-query-sqlx', 'sea-query-binder', 'sea-orm-cli',
-              'sqlx', 'sqlx-core', 'sqlx-postgres', 'sqlx-sqlite',
-          }
-          for package_id, package in sorted(packages.items(), key=lambda item: (item[1]['name'], item[1]['version'])):
-              if package['name'] in interesting_names and package_id in nodes:
-                  print(f"NODE {package['name']} {package['version']}")
-                  print('  features=' + ','.join(nodes[package_id].get('features', [])))
-                  for parent_id in reverse.get(package_id, []):
-                      parent = packages[parent_id]
-                      print(
-                          f"  parent={parent['name']} {parent['version']} "
-                          f"features={','.join(nodes[parent_id].get('features', []))}"
-                      )
-
-          targets = [
-              package_id for package_id, package in packages.items()
-              if package['name'] == 'rust_decimal'
-          ]
-          for target in targets:
-              print(f"REVERSE PATHS TO {packages[target]['name']} {packages[target]['version']}")
-              queue = deque([(target, [target])])
-              seen = {target}
-              while queue:
-                  current, path = queue.popleft()
-                  parents = reverse.get(current, [])
-                  if not parents:
-                      labels = [f"{packages[item]['name']} {packages[item]['version']}" for item in reversed(path)]
-                      print('  ' + ' -> '.join(labels))
-                  for parent in parents:
-                      if parent not in seen:
-                          seen.add(parent)
-                          queue.append((parent, path + [parent]))
-          PY
-          echo '=== Resolved package feature declarations ==='
-          jq -r '.packages[] | select(.name == "sea-orm" or .name == "sea-orm-migration" or .name == "sea-query" or .name == "sea-query-sqlx" or .name == "rust_decimal") | "PACKAGE \(.name) \(.version)\n" + (.features | to_entries | map("  \(.key)=\(.value|join(","))") | join("\n"))' /tmp/cargo-metadata.json
+          active_path="$(cargo tree \
+            --workspace \
+            --locked \
+            --target "$BUILD_TARGET" \
+            --invert rkyv@0.7.46 \
+            --edges normal,build,dev \
+            --prefix none 2>/dev/null || true)"
+          if [ -n "$active_path" ]; then
+            printf '%s\n' "$active_path" >&2
+            exit 1
+          fi
+          active_decimal="$(cargo tree \
+            --workspace \
+            --locked \
+            --target "$BUILD_TARGET" \
+            --invert rust_decimal \
+            --edges normal,build,dev \
+            --prefix none 2>/dev/null || true)"
+          if [ -n "$active_decimal" ]; then
+            printf '%s\n' "$active_decimal" >&2
+            exit 1
+          fi
+          grep -Fq 'name = "rkyv"' Cargo.lock
+          echo "lockfile-only optional archive packages remain guarded and inactive"
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Check
+        run: cargo check --workspace --all-targets --locked --target "$BUILD_TARGET"
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked --target "$BUILD_TARGET" -- -D warnings
+      - name: Test
+        run: cargo test --workspace --all-targets --locked --target "$BUILD_TARGET"
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.2
+      - name: RustSec audit with guarded lockfile-only exception
+        run: >-
+          cargo audit --deny unmaintained --deny unsound --deny yanked
+          --ignore RUSTSEC-2026-0173 --ignore RUSTSEC-2026-0235
+      - name: Summarize patch footprint
+        if: always()
+        run: |
+          git status --short
+          git diff --stat
