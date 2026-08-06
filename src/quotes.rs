@@ -38,7 +38,7 @@ const NOTES_MAX_CHARS: usize = 4_000;
 const CONTEXT_MAX_BYTES: usize = 64 * 1024;
 const PROMPT_MAX_BYTES: usize = 128 * 1024;
 const GEMINI_RESPONSE_MAX_BYTES: usize = 1024 * 1024;
-const DEFAULT_GEMINI_MODEL: &str = "gemini-3.6-pro";
+const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-pro-preview";
 const STATIC_QUOTE_CONTEXT: &str = include_str!("../context/compliance-quote.md");
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
