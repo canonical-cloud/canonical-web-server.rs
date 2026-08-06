@@ -30,6 +30,7 @@ pub struct AppState {
     pub login_rate_limiter: auth::LoginRateLimiter,
     pub(crate) login_auth_semaphore: Arc<Semaphore>,
     pub sessions: auth::SessionService,
+    pub shared_auth: auth::SharedAuthVerifier,
     pub hub: ws::Hub,
     pub(crate) bearer_auth_semaphore: Arc<Semaphore>,
 }
@@ -40,6 +41,7 @@ impl AppState {
         db: sea_orm::DatabaseConnection,
         auth: Arc<dyn AuthProvider>,
     ) -> Result<Self, AppError> {
+        let shared_auth = auth::SharedAuthVerifier::from_env(&config)?;
         let config = Arc::new(config);
         let sessions = auth::SessionService::new(
             db.clone(),
@@ -63,6 +65,7 @@ impl AppState {
             login_rate_limiter,
             login_auth_semaphore,
             sessions,
+            shared_auth,
             hub: ws::Hub::new(256),
             bearer_auth_semaphore,
         })
