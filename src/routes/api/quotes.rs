@@ -1,8 +1,5 @@
 use crate::{
-    auth::{
-        require_csrf, require_origin, CredentialSource, QuoteAuthenticated,
-        QuoteSessionAuthenticated,
-    },
+    auth::{require_csrf, require_origin, CredentialSource, QuoteAuthenticated},
     error::AppError,
     quotes::{self, QuoteRecord, QuoteRequest},
     AppState,
@@ -53,7 +50,7 @@ pub async fn create(
     QuoteAuthenticated(actor): QuoteAuthenticated,
     Json(request): Json<QuoteRequest>,
 ) -> Result<Response, AppError> {
-    if actor.source == CredentialSource::SessionCookie {
+    if requires_browser_origin(actor.source) {
         require_origin(&headers, &state)?;
         require_csrf(&actor, &headers, None)?;
     }
@@ -64,15 +61,20 @@ pub async fn create(
 pub async fn websocket(
     State(state): State<AppState>,
     headers: HeaderMap,
-    auth: Result<QuoteSessionAuthenticated, AppError>,
+    auth: Result<QuoteAuthenticated, AppError>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
     let actor = match auth {
-        Ok(QuoteSessionAuthenticated(actor)) => actor,
+        Ok(QuoteAuthenticated(actor)) => actor,
         Err(error) => return error.into_response(),
     };
-    if let Err(error) = require_origin(&headers, &state) {
-        return error.into_response();
+    // Browsers authenticate with a host-only cookie and must prove their exact
+    // Origin. Non-browser API clients authenticate the upgrade with a Shared
+    // Auth bearer token and therefore do not depend on an Origin header.
+    if requires_browser_origin(actor.source) {
+        if let Err(error) = require_origin(&headers, &state) {
+            return error.into_response();
+        }
     }
     let permit = match state.hub.try_acquire_socket(actor.user_id) {
         Some(permit) => permit,
@@ -91,4 +93,19 @@ pub async fn websocket(
             let _permit = permit;
             quotes::serve_websocket(socket, actor.user_id).await;
         })
+}
+
+fn requires_browser_origin(source: CredentialSource) -> bool {
+    source == CredentialSource::SessionCookie
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_cookie_credentials_require_browser_origin() {
+        assert!(requires_browser_origin(CredentialSource::SessionCookie));
+        assert!(!requires_browser_origin(CredentialSource::Bearer));
+    }
 }
