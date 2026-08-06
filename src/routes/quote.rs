@@ -1,5 +1,5 @@
 use crate::{
-    auth::{require_csrf, require_origin, SessionAuthenticated},
+    auth::{require_csrf, require_origin, QuoteSessionAuthenticated},
     error::AppError,
     quotes::{self, QuoteRequest},
     AppState,
@@ -14,17 +14,16 @@ use maud::html;
 use serde::Deserialize;
 use uuid::Uuid;
 
-const QUOTE_RETURN_TO: &str = "https://app.canonical.plus/u/quote";
-const DEFAULT_SHARED_AUTH_AUTHORIZE: &str = "https://auth.canonical.plus/authorize";
-const DEFAULT_SHARED_AUTH_CLIENT_ID: &str = "canonical-plus-web";
+const QUOTE_RETURN_PATH: &str = "/u/quote";
+const SHARED_AUTH_BROWSER_SIGN_IN_PATH: &str = "/shared-auth/auth/browser/sign-in";
 
 pub async fn page(
     State(state): State<AppState>,
-    auth: Result<SessionAuthenticated, AppError>,
+    auth: Result<QuoteSessionAuthenticated, AppError>,
 ) -> Response {
     let actor = match auth {
-        Ok(SessionAuthenticated(actor)) => actor,
-        Err(AppError::Unauthorized) => return shared_auth_redirect().into_response(),
+        Ok(QuoteSessionAuthenticated(actor)) => actor,
+        Err(AppError::Unauthorized) => return shared_auth_redirect(&state).into_response(),
         Err(error) => return error.into_response(),
     };
     match quotes::list_quotes(&state, actor.user_id, 20).await {
@@ -35,12 +34,12 @@ pub async fn page(
 
 pub async fn detail(
     State(state): State<AppState>,
-    auth: Result<SessionAuthenticated, AppError>,
+    auth: Result<QuoteSessionAuthenticated, AppError>,
     Path(raw_id): Path<String>,
 ) -> Response {
     let actor = match auth {
-        Ok(SessionAuthenticated(actor)) => actor,
-        Err(AppError::Unauthorized) => return shared_auth_redirect().into_response(),
+        Ok(QuoteSessionAuthenticated(actor)) => actor,
+        Err(AppError::Unauthorized) => return shared_auth_redirect(&state).into_response(),
         Err(error) => return error.into_response(),
     };
     let quote_id = match Uuid::parse_str(&raw_id) {
@@ -56,12 +55,14 @@ pub async fn detail(
 pub async fn submit(
     State(state): State<AppState>,
     headers: HeaderMap,
-    auth: Result<SessionAuthenticated, AppError>,
+    auth: Result<QuoteSessionAuthenticated, AppError>,
     Form(form): Form<QuoteForm>,
 ) -> Response {
     let actor = match auth {
-        Ok(SessionAuthenticated(actor)) => actor,
-        Err(AppError::Unauthorized) => return htmx_or_browser_auth_redirect(&headers),
+        Ok(QuoteSessionAuthenticated(actor)) => actor,
+        Err(AppError::Unauthorized) => {
+            return htmx_or_browser_auth_redirect(&headers, &state)
+        }
         Err(error) => return error.into_response(),
     };
     if let Err(error) = require_origin(&headers, &state) {
@@ -123,13 +124,14 @@ pub struct QuoteForm {
 
 impl QuoteForm {
     fn into_request(self) -> Result<QuoteRequest, AppError> {
-        let employee_count =
-            match self.employee_count.trim() {
-                "" => None,
-                value => Some(value.parse::<u32>().map_err(|_| {
-                    AppError::BadRequest("employees must be a whole number".into())
-                })?),
-            };
+        let employee_count = match self.employee_count.trim() {
+            "" => None,
+            value => Some(
+                value
+                    .parse::<u32>()
+                    .map_err(|_| AppError::BadRequest("employees must be a whole number".into()))?,
+            ),
+        };
         let frameworks = [
             ("soc2", self.soc2),
             ("nist_csf", self.nist_csf),
@@ -169,41 +171,32 @@ fn optional(value: String) -> Option<String> {
     (!value.trim().is_empty()).then_some(value)
 }
 
-fn shared_auth_redirect() -> Redirect {
-    let authorize = std::env::var("SHARED_AUTH_AUTHORIZE_URL")
-        .unwrap_or_else(|_| DEFAULT_SHARED_AUTH_AUTHORIZE.to_owned());
-    let client_id = std::env::var("SHARED_AUTH_CLIENT_ID")
-        .unwrap_or_else(|_| DEFAULT_SHARED_AUTH_CLIENT_ID.to_owned());
-    let mut destination = reqwest::Url::parse(&authorize)
-        .ok()
-        .filter(|url| {
-            url.scheme() == "https"
-                && url.host_str().is_some()
-                && url.username().is_empty()
-                && url.password().is_none()
-        })
-        .unwrap_or_else(|| reqwest::Url::parse(DEFAULT_SHARED_AUTH_AUTHORIZE).unwrap());
+fn shared_auth_sign_in_url(app_base_url: &str) -> reqwest::Url {
+    let mut destination = reqwest::Url::parse(app_base_url)
+        .expect("APP_BASE_URL was validated before application state construction");
+    destination.set_path(SHARED_AUTH_BROWSER_SIGN_IN_PATH);
+    destination.set_query(None);
     destination
         .query_pairs_mut()
-        .append_pair("client_id", &client_id)
-        .append_pair("return_to", QUOTE_RETURN_TO);
+        .append_pair("return", QUOTE_RETURN_PATH);
+    destination
+}
+
+fn shared_auth_redirect(state: &AppState) -> Redirect {
+    let destination = shared_auth_sign_in_url(&state.config.app_base_url);
     Redirect::temporary(destination.as_str())
 }
 
-fn htmx_or_browser_auth_redirect(headers: &HeaderMap) -> Response {
-    let redirect = shared_auth_redirect();
+fn htmx_or_browser_auth_redirect(headers: &HeaderMap, state: &AppState) -> Response {
+    let destination = shared_auth_sign_in_url(&state.config.app_base_url);
     if headers.contains_key("hx-request") {
-        let location = redirect.into_response();
-        let destination = location
-            .headers()
-            .get(axum::http::header::LOCATION)
-            .cloned()
-            .unwrap_or_else(|| HeaderValue::from_static(DEFAULT_SHARED_AUTH_AUTHORIZE));
         let mut response = StatusCode::UNAUTHORIZED.into_response();
-        response.headers_mut().insert("hx-redirect", destination);
+        if let Ok(value) = HeaderValue::from_str(destination.as_str()) {
+            response.headers_mut().insert("hx-redirect", value);
+        }
         response
     } else {
-        redirect.into_response()
+        Redirect::temporary(destination.as_str()).into_response()
     }
 }
 
@@ -252,7 +245,18 @@ mod tests {
     }
 
     #[test]
-    fn auth_return_target_is_fixed() {
-        assert_eq!(QUOTE_RETURN_TO, "https://app.canonical.plus/u/quote");
+    fn auth_return_target_is_same_origin_and_relative() {
+        let destination = shared_auth_sign_in_url("https://app.canonical.plus");
+        assert_eq!(
+            destination.as_str(),
+            "https://app.canonical.plus/shared-auth/auth/browser/sign-in?return=%2Fu%2Fquote"
+        );
+        assert_eq!(
+            destination
+                .query_pairs()
+                .find(|(name, _)| name == "return")
+                .map(|(_, value)| value.into_owned()),
+            Some(QUOTE_RETURN_PATH.into())
+        );
     }
 }
