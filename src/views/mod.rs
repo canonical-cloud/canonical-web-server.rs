@@ -289,7 +289,6 @@ fn status_label(status: &str) -> &'static str {
     }
 }
 
-
 pub fn quote_page(email: &str) -> Markup {
     layout(
         "Get a quote",
