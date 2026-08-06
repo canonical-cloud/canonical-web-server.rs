@@ -2,6 +2,11 @@
 -- `canonical_context` is the physical SQL identifier for the logical
 -- "canonical-context" record set; snake_case avoids requiring quoted names in
 -- every SeaORM query and policy.
+--
+-- `compliance_quote.owner_id` is a provider-neutral Shared Auth principal UUID,
+-- not necessarily a row in this product's Supabase `auth.users` table. Identity
+-- proof happens before the request enters the transaction; RLS then binds the
+-- row to `request.jwt.claim.sub` through `auth.uid()`.
 
 CREATE TABLE IF NOT EXISTS canonical_context (
   id uuid PRIMARY KEY,
@@ -19,7 +24,7 @@ CREATE INDEX IF NOT EXISTS canonical_context_active_key_idx
 
 CREATE TABLE IF NOT EXISTS compliance_quote (
   id uuid PRIMARY KEY,
-  owner_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  owner_id uuid NOT NULL,
   status text NOT NULL CHECK (status IN ('queued', 'analyzing', 'ready', 'failed')),
   request jsonb NOT NULL CHECK (jsonb_typeof(request) = 'object'),
   analysis jsonb CHECK (analysis IS NULL OR jsonb_typeof(analysis) = 'object'),
@@ -50,7 +55,6 @@ DROP POLICY IF EXISTS compliance_quote_owner ON compliance_quote;
 CREATE POLICY compliance_quote_owner ON compliance_quote
   USING (owner_id = auth.uid())
   WITH CHECK (owner_id = auth.uid());
-
 
 INSERT INTO canonical_context (
   id, context_key, version, context_markdown, active
