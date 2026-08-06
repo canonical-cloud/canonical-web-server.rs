@@ -2,7 +2,10 @@
 
 use sea_orm_migration::MigratorTrait;
 
-use crate::{db::migration::Migrator, error::AppError};
+use crate::{
+    db::{migration::Migrator, quote_migration::QuoteMigrator},
+    error::AppError,
+};
 
 pub async fn connect(
     database_url: &str,
@@ -20,6 +23,7 @@ pub async fn run_migrations(
 ) -> Result<(), AppError> {
     let db = connect(database_url, database_max_connections).await?;
     Migrator::up(&db, None).await?;
+    QuoteMigrator::up(&db, None).await?;
     db.close().await?;
     Ok(())
 }
