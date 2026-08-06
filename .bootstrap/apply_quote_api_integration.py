@@ -11,98 +11,24 @@ def replace_once(path: Path, old: str, new: str) -> None:
 app = Path("src/app.rs")
 replace_once(
     app,
-    "    pub shared_auth: auth::SharedAuthVerifier,\n    pub hub: ws::Hub,\n",
-    "    pub shared_auth: auth::SharedAuthVerifier,\n    pub(crate) quote_api: Option<Arc<crate::quote_api::QuoteApiClient>>,\n    pub hub: ws::Hub,\n",
-)
-replace_once(
-    app,
-    "            shared_auth,\n            hub: ws::Hub::new(256),\n",
-    "            shared_auth,\n            quote_api: None,\n            hub: ws::Hub::new(256),\n",
-)
-replace_once(
-    app,
     """    #[cfg(feature = "test-auth")]
     if auth::test_provider::BrowserTestAuth::is_enabled() {
         tracing::warn!("browser-e2e test authentication provider enabled");
         return AppState::new(config, db, Arc::new(auth::test_provider::BrowserTestAuth));
     }
-
-    let auth = Arc::new(auth::SupabaseAuth::new(
-        config.supabase_url.clone(),
-        config.supabase_publishable_key.clone(),
-    )?);
-    AppState::new(config, db, auth)
 """,
     """    #[cfg(feature = "test-auth")]
     if auth::test_provider::BrowserTestAuth::is_enabled() {
         tracing::warn!("browser-e2e test authentication provider enabled");
         let mut state =
             AppState::new(config, db, Arc::new(auth::test_provider::BrowserTestAuth))?;
-        state.quote_api = Some(Arc::new(crate::quote_api::QuoteApiClient::from_env()?));
+        state.quote_api = crate::quote_api::QuoteApiClient::from_env()
+            .ok()
+            .map(Arc::new);
         return Ok(state);
     }
-
-    let auth = Arc::new(auth::SupabaseAuth::new(
-        config.supabase_url.clone(),
-        config.supabase_publishable_key.clone(),
-    )?);
-    let mut state = AppState::new(config, db, auth)?;
-    state.quote_api = Some(Arc::new(crate::quote_api::QuoteApiClient::from_env()?));
-    Ok(state)
 """,
 )
-
-lib = Path("src/lib.rs")
-replace_once(
-    lib,
-    """// The quote workflow remains in this process temporarily while the dedicated
-// `canonical-api-server.rs` service takes over this boundary.
-#[allow(dead_code, unused_imports)]
-pub mod quotes;
-pub mod routes;
-""",
-    """pub mod quote_api;
-pub mod routes;
-""",
-)
-
-error = Path("src/error.rs")
-replace_once(
-    error,
-    "    #[error(\"upstream authentication service failed\")]\n    AuthUpstream,\n",
-    "    #[error(\"upstream authentication service failed\")]\n    AuthUpstream,\n    #[error(\"upstream application service failed\")]\n    ServiceUpstream,\n",
-)
-replace_once(
-    error,
-    """            Self::AuthUpstream => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "auth_upstream_unavailable",
-                "authentication service is temporarily unavailable",
-            ),
-            Self::RateLimited { .. } => (
-""",
-    """            Self::AuthUpstream => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "auth_upstream_unavailable",
-                "authentication service is temporarily unavailable",
-            ),
-            Self::ServiceUpstream => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "service_upstream_unavailable",
-                "quote analysis is temporarily unavailable",
-            ),
-            Self::RateLimited { .. } => (
-""",
-)
-
-api_routes = Path("src/routes/api/mod.rs")
-replace_once(api_routes, "mod quotes;\n\n", "")
-for route in [
-    '        .route("/quotes", get(quotes::list).post(quotes::create))\n',
-    '        .route("/quotes/ws", get(quotes::websocket))\n',
-    '        .route("/quotes/{id}", get(quotes::get))\n',
-]:
-    replace_once(api_routes, route, "")
 
 quote_route = Path("src/routes/quote.rs")
 for old, new in [
@@ -114,21 +40,26 @@ for old, new in [
     replace_once(quote_route, old, new)
 replace_once(
     quote_route,
-    "            (\"fedramp\", self.fedramp),\n",
-    "            (\"fedramp\", self.fedramp),\n            (\"gdpr\", self.gdpr),\n",
+    "            (\"fedramp\", self.fedramp),\n            (\"pci-dss\", self.pci_dss),\n",
+    "            (\"fedramp\", self.fedramp),\n            (\"pci-dss\", self.pci_dss),\n            (\"gdpr\", self.gdpr),\n",
 )
 replace_once(
     quote_route,
-    "    #[serde(default)]\n    fedramp: Option<String>,\n",
-    "    #[serde(default)]\n    fedramp: Option<String>,\n    #[serde(default)]\n    gdpr: Option<String>,\n",
+    "    #[serde(default)]\n    pci_dss: Option<String>,\n    #[serde(default)]\n    handles_phi: Option<String>,\n",
+    "    #[serde(default)]\n    pci_dss: Option<String>,\n    #[serde(default)]\n    gdpr: Option<String>,\n    #[serde(default)]\n    handles_phi: Option<String>,\n",
 )
 replace_once(
     quote_route,
-    "            fedramp: None,\n            csrf: \"token\".into(),\n",
-    "            fedramp: None,\n            gdpr: None,\n            csrf: \"token\".into(),\n",
+    "            pci_dss: None,\n            handles_phi: Some(\"on\".into()),\n",
+    "            pci_dss: None,\n            gdpr: None,\n            handles_phi: Some(\"on\".into()),\n",
 )
 
 env_file = Path(".env.example")
+replace_once(
+    env_file,
+    "# Dedicated quote backend. Both values are required when the serve process\n",
+    "# Dedicated quote backend. All three values are required when the serve process\n",
+)
 replace_once(
     env_file,
     "CANONICAL_WEB_SERVICE_TOKEN=replace-with-at-least-32-random-bytes\n",
@@ -166,8 +97,7 @@ context record, application Markdown, Gemini key, or Gemini model.
 """,
 )
 
-model_contract = Path("tests/gemini_model_contract.rs")
-model_contract.write_text(
+Path("tests/gemini_model_contract.rs").write_text(
     """const QUOTE_CLIENT_SOURCE: &str = include_str!(\"../src/quote_api.rs\");
 const LIB_SOURCE: &str = include_str!(\"../src/lib.rs\");
 
@@ -185,5 +115,6 @@ fn browser_tier_delegates_quote_analysis_without_gemini_credentials() {
 """
 )
 
-for obsolete in [Path("src/quotes.rs"), Path("src/routes/api/quotes.rs")]:
-    obsolete.unlink(missing_ok=False)
+for obsolete in (Path("src/quotes.rs"), Path("src/routes/api/quotes.rs")):
+    if obsolete.exists():
+        obsolete.unlink()
