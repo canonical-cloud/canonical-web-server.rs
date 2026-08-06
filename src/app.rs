@@ -19,6 +19,7 @@ use crate::{
     config::Config,
     database,
     error::AppError,
+    integrations::{QuoteApiClient, SharedAuthClient},
     metrics, routes, telemetry, ws,
 };
 
@@ -32,6 +33,8 @@ pub struct AppState {
     pub sessions: auth::SessionService,
     pub hub: ws::Hub,
     pub(crate) bearer_auth_semaphore: Arc<Semaphore>,
+    pub shared_auth: Arc<SharedAuthClient>,
+    pub quote_api: Arc<QuoteApiClient>,
 }
 
 impl AppState {
@@ -40,6 +43,8 @@ impl AppState {
         db: sea_orm::DatabaseConnection,
         auth: Arc<dyn AuthProvider>,
     ) -> Result<Self, AppError> {
+        let shared_auth = Arc::new(SharedAuthClient::from_env(&config.app_base_url)?);
+        let quote_api = Arc::new(QuoteApiClient::from_env()?);
         let config = Arc::new(config);
         let sessions = auth::SessionService::new(
             db.clone(),
@@ -65,6 +70,8 @@ impl AppState {
             sessions,
             hub: ws::Hub::new(256),
             bearer_auth_semaphore,
+            shared_auth,
+            quote_api,
         })
     }
 }
@@ -95,7 +102,11 @@ pub fn build_app(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(metrics::record_http));
 
     app.layer((
-        SetSensitiveRequestHeadersLayer::new([header::AUTHORIZATION, header::COOKIE]),
+        SetSensitiveRequestHeadersLayer::new([
+            header::AUTHORIZATION,
+            header::COOKIE,
+            HeaderName::from_static("x-canonical-service-token"),
+        ]),
         SetRequestIdLayer::new(request_id_header.clone(), MakeRequestUuid),
         PropagateRequestIdLayer::new(request_id_header),
         SetResponseHeaderLayer::if_not_present(

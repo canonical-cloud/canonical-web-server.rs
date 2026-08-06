@@ -20,6 +20,8 @@ pub enum AppError {
     NotFound,
     #[error("upstream authentication service failed")]
     AuthUpstream,
+    #[error("quote API is temporarily unavailable")]
+    QuoteUpstream,
     #[error("request rate limit exceeded")]
     RateLimited { retry_after_seconds: u64 },
     #[error("password authentication capacity is temporarily exhausted")]
@@ -32,6 +34,8 @@ pub enum AppError {
     HttpClient(#[from] reqwest::Error),
     #[error("Supabase Auth client configuration failed")]
     AuthClient(#[from] canonical_auth::SupabaseAuthBuildError),
+    #[error("integration configuration failed")]
+    IntegrationConfig(#[from] crate::integrations::IntegrationConfigError),
     #[error("I/O error")]
     Io(#[from] std::io::Error),
     #[error("session cryptography failed")]
@@ -79,6 +83,11 @@ impl IntoResponse for AppError {
                 StatusCode::SERVICE_UNAVAILABLE,
                 "auth_upstream_unavailable",
                 "authentication service is temporarily unavailable",
+            ),
+            Self::QuoteUpstream => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "quote_upstream_unavailable",
+                "quote analysis is temporarily unavailable",
             ),
             Self::RateLimited { .. } => (
                 StatusCode::TOO_MANY_REQUESTS,
