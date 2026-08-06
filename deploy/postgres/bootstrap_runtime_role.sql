@@ -165,8 +165,14 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   public.sync_change,
   public.sync_receipt,
   public.audit_engagement,
-  public.engagement_note
+  public.engagement_note,
+  public.quote_request
 TO canonical_web_server;
+
+-- Context instructions are updated only by the reviewed migration/content
+-- workflow. The customer process can read the active record through RLS but
+-- cannot mutate prompt policy at runtime.
+GRANT SELECT ON TABLE public.canonical_context TO canonical_web_server;
 
 -- No current customer table uses a sequence. A future sequence must be
 -- reviewed and granted by exact name; never grant every current/future public
