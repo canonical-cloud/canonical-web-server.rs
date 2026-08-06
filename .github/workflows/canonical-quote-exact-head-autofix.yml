@@ -45,57 +45,49 @@ jobs:
 
           cockroach = Path("tests/cockroach_rls.rs")
           text = cockroach.read_text()
-          old = '''    assert_eq!(
-              policy_count, 8,
-              "expected seven owner policies plus the web-session process boundary"
-          );'''
-          new = '''    assert_eq!(
-              policy_count, 10,
-              "expected eight owner policies, canonical-context runtime read, and web-session process boundary"
-          );'''
-          if old in text:
-              text = text.replace(old, new, 1)
-          elif new not in text:
+          if "policy_count, 8," in text:
+              text = text.replace("policy_count, 8,", "policy_count, 10,", 1)
+          elif "policy_count, 10," not in text:
               raise SystemExit("unexpected Cockroach policy-count assertion")
+          old_message = '"expected seven owner policies plus the web-session process boundary"'
+          new_message = '"expected nine owner policies plus the web-session process boundary"'
+          if old_message in text:
+              text = text.replace(old_message, new_message, 1)
           cockroach.write_text(text)
 
           workflow = Path(".github/workflows/ci.yml")
           text = workflow.read_text()
-          old = '''      - name: Audit Rust dependencies
-              shell: bash
-              run: |
-                # RUSTSEC-2026-0173: unmaintained (not vulnerable) compile-time-only
-                # proc-macro-error2, currently required by SeaORM's derive macros.
-                cargo audit --deny warnings \\
-                  --ignore RUSTSEC-2026-0173
+          marker = "      - name: Audit Rust dependencies\n"
+          guard_name = "      - name: Assert vulnerable rkyv is not in the active build graph\n"
+          guard = '''      - name: Assert vulnerable rkyv is not in the active build graph
+                  shell: bash
+                  run: |
+                    # RUSTSEC-2026-0235 affects rkyv 0.7 archive validation. SeaORM's
+                    # optional rust_decimal edge records it in Cargo.lock even though
+                    # this workspace does not enable that feature. Fail closed if the
+                    # vulnerable package ever enters an active build graph.
+                    rkyv_path="$(cargo tree --workspace --invert rkyv@0.7.46 2>/dev/null || true)"
+                    if [ -n "$rkyv_path" ]; then
+                      printf '%s\n' "$rkyv_path" >&2
+                      echo "vulnerable rkyv unexpectedly entered the active dependency graph" >&2
+                      exit 1
+                    fi
           '''
-          new = '''      - name: Assert vulnerable rkyv is not in the active build graph
-              shell: bash
-              run: |
-                # RUSTSEC-2026-0235 affects rkyv 0.7 archive validation. SeaORM's
-                # optional rust_decimal edge records it in Cargo.lock even though
-                # this workspace does not enable that feature. Fail closed if the
-                # vulnerable package ever enters an active build graph.
-                rkyv_path="$(cargo tree --workspace --invert rkyv@0.7.46 2>/dev/null || true)"
-                if [ -n "$rkyv_path" ]; then
-                  printf '%s\n' "$rkyv_path" >&2
-                  echo "vulnerable rkyv unexpectedly entered the active dependency graph" >&2
-                  exit 1
-                fi
-              - name: Audit Rust dependencies
-              shell: bash
-              run: |
-                # RUSTSEC-2026-0173: unmaintained (not vulnerable) compile-time-only
-                # proc-macro-error2, currently required by SeaORM's derive macros.
-                # RUSTSEC-2026-0235: inactive lockfile-only rkyv edge, guarded above.
-                cargo audit --deny warnings \\
-                  --ignore RUSTSEC-2026-0173 \\
-                  --ignore RUSTSEC-2026-0235
-          '''
-          if old in text:
-              text = text.replace(old, new, 1)
-          elif new not in text:
-              raise SystemExit("unexpected cargo-audit workflow block")
+          # YAML removes the shell block's common indentation before Python runs.
+          guard = "\n".join(line[8:] if line.startswith("        ") else line for line in guard.splitlines()) + "\n"
+          if guard_name not in text:
+              if marker not in text:
+                  raise SystemExit("cargo-audit workflow marker not found")
+              text = text.replace(marker, guard + marker, 1)
+          if "--ignore RUSTSEC-2026-0235" not in text:
+              advisory = "--ignore RUSTSEC-2026-0173"
+              if advisory not in text:
+                  raise SystemExit("existing cargo-audit ignore not found")
+              text = text.replace(
+                  advisory,
+                  advisory + " --ignore RUSTSEC-2026-0235",
+                  1,
+              )
           workflow.write_text(text)
           PY
 
@@ -104,6 +96,6 @@ jobs:
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/quotes.rs src/auth/shared_auth.rs src/routes/quote.rs tests/cockroach_rls.rs .github/workflows/ci.yml
+          git add -A
           git commit -m "fix: stabilize canonical quote exact-head gates"
           git push origin HEAD:feat/canonical-plus-quote-platform
