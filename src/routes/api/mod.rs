@@ -1,7 +1,7 @@
 use crate::{
     auth::{require_csrf, require_origin, Authenticated, CredentialSource},
     error::AppError,
-    routes::health,
+    routes::{health, quote},
     sync::{self, MutationBatch, PullQuery},
     AppState,
 };
@@ -20,6 +20,7 @@ pub fn router() -> Router<AppState> {
         .route("/me", get(me))
         .route("/sync/changes", get(pull))
         .route("/sync/mutations", post(push))
+        .nest("/quotes", quote::api_router())
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .fallback(not_found);
 
