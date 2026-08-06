@@ -137,8 +137,15 @@ jobs:
           # RUSTSEC-2026-0173: unmaintained (not vulnerable) compile-time-only
           # proc-macro-error2, currently required by SeaORM's derive macros.
           # RUSTSEC-2026-0235: unreachable lockfile-only rkyv entry, guarded by
-          # the resolved-graph assertion above.
-          cargo audit --deny warnings \
+          # the resolved-graph assertion above. Do not use `--deny warnings`:
+          # cargo-audit intentionally reports accepted `--ignore` entries as
+          # allowed warnings, so that catch-all would reject the reviewed
+          # exceptions themselves. Unignored vulnerabilities still fail by
+          # default, while the explicit categories below retain strict policy.
+          cargo audit \
+            --deny unmaintained \
+            --deny unsound \
+            --deny yanked \
             --ignore RUSTSEC-2026-0173 \
             --ignore RUSTSEC-2026-0235
 
