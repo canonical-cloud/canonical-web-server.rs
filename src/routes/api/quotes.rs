@@ -1,5 +1,8 @@
 use crate::{
-    auth::{require_csrf, require_origin, Authenticated, CredentialSource, SessionAuthenticated},
+    auth::{
+        require_csrf, require_origin, CredentialSource, QuoteAuthenticated,
+        QuoteSessionAuthenticated,
+    },
     error::AppError,
     quotes::{self, QuoteRecord, QuoteRequest},
     AppState,
@@ -26,7 +29,7 @@ fn default_limit() -> usize {
 
 pub async fn list(
     State(state): State<AppState>,
-    Authenticated(actor): Authenticated,
+    QuoteAuthenticated(actor): QuoteAuthenticated,
     Query(query): Query<QuoteListQuery>,
 ) -> Result<Json<Vec<QuoteRecord>>, AppError> {
     Ok(Json(
@@ -36,7 +39,7 @@ pub async fn list(
 
 pub async fn get(
     State(state): State<AppState>,
-    Authenticated(actor): Authenticated,
+    QuoteAuthenticated(actor): QuoteAuthenticated,
     Path(quote_id): Path<Uuid>,
 ) -> Result<Json<QuoteRecord>, AppError> {
     Ok(Json(
@@ -47,7 +50,7 @@ pub async fn get(
 pub async fn create(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Authenticated(actor): Authenticated,
+    QuoteAuthenticated(actor): QuoteAuthenticated,
     Json(request): Json<QuoteRequest>,
 ) -> Result<Response, AppError> {
     if actor.source == CredentialSource::SessionCookie {
@@ -61,11 +64,11 @@ pub async fn create(
 pub async fn websocket(
     State(state): State<AppState>,
     headers: HeaderMap,
-    auth: Result<SessionAuthenticated, AppError>,
+    auth: Result<QuoteSessionAuthenticated, AppError>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
     let actor = match auth {
-        Ok(SessionAuthenticated(actor)) => actor,
+        Ok(QuoteSessionAuthenticated(actor)) => actor,
         Err(error) => return error.into_response(),
     };
     if let Err(error) = require_origin(&headers, &state) {
