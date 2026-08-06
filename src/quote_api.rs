@@ -25,10 +25,8 @@ impl QuoteApiClient {
             .map_err(|_| AppError::BadRequest("CANONICAL_API_URL is required".into()))?;
         let parsed = Url::parse(&raw_url)
             .map_err(|_| AppError::BadRequest("CANONICAL_API_URL must be absolute".into()))?;
-        let loopback = matches!(
-            parsed.host_str(),
-            Some("localhost" | "127.0.0.1" | "::1")
-        ) || parsed.host_str().is_some_and(|host| host.ends_with(".svc"))
+        let loopback = matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "::1"))
+            || parsed.host_str().is_some_and(|host| host.ends_with(".svc"))
             || parsed.host_str().is_some_and(|host| host.contains(".svc."));
         if parsed.host_str().is_none()
             || !parsed.username().is_empty()
@@ -43,9 +41,8 @@ impl QuoteApiClient {
                     .into(),
             ));
         }
-        let service_token = env::var("CANONICAL_WEB_SERVICE_TOKEN").map_err(|_| {
-            AppError::BadRequest("CANONICAL_WEB_SERVICE_TOKEN is required".into())
-        })?;
+        let service_token = env::var("CANONICAL_WEB_SERVICE_TOKEN")
+            .map_err(|_| AppError::BadRequest("CANONICAL_WEB_SERVICE_TOKEN is required".into()))?;
         if service_token.len() < 32 || service_token.trim() != service_token {
             return Err(AppError::BadRequest(
                 "CANONICAL_WEB_SERVICE_TOKEN must contain at least 32 bytes".into(),
@@ -131,7 +128,10 @@ async fn decode<T: DeserializeOwned>(
     if status == StatusCode::NOT_FOUND {
         return Err(AppError::NotFound);
     }
-    if matches!(status, StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY) {
+    if matches!(
+        status,
+        StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY
+    ) {
         return Err(AppError::BadRequest(
             "review the quote fields and try again".into(),
         ));
