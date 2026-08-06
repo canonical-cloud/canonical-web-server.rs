@@ -44,52 +44,6 @@ impl FromRequestParts<AppState> for EdgeAuthenticated {
     }
 }
 
-pub(crate) fn signed_headers(
-    method: &Method,
-    path_and_query: &str,
-    identity: &EdgeIdentity,
-    secret: &[u8],
-) -> Result<HeaderMap, AppError> {
-    let issued_at = chrono::Utc::now().timestamp();
-    let payload = assertion_payload(
-        method.as_str(),
-        path_and_query,
-        issued_at,
-        &identity.user_id.to_string(),
-        &identity.email,
-    );
-    let mut mac = <HmacSha256 as KeyInit>::new_from_slice(secret).map_err(|_| AppError::Crypto)?;
-    mac.update(payload.as_bytes());
-    let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        USER_HEADER,
-        identity
-            .user_id
-            .to_string()
-            .parse()
-            .map_err(|_| AppError::Crypto)?,
-    );
-    if !identity.email.is_empty() {
-        headers.insert(
-            EMAIL_HEADER,
-            identity.email.parse().map_err(|_| AppError::Crypto)?,
-        );
-    }
-    headers.insert(
-        ISSUED_AT_HEADER,
-        issued_at
-            .to_string()
-            .parse()
-            .map_err(|_| AppError::Crypto)?,
-    );
-    headers.insert(
-        ASSERTION_HEADER,
-        signature.parse().map_err(|_| AppError::Crypto)?,
-    );
-    Ok(headers)
-}
-
 fn verify_assertion(
     method: &Method,
     uri: &Uri,
