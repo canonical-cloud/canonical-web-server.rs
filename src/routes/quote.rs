@@ -122,14 +122,13 @@ pub struct QuoteForm {
 
 impl QuoteForm {
     fn into_request(self) -> Result<QuoteRequest, AppError> {
-        let employee_count = match self.employee_count.trim() {
-            "" => None,
-            value => Some(
-                value
-                    .parse::<u32>()
-                    .map_err(|_| AppError::BadRequest("employees must be a whole number".into()))?,
-            ),
-        };
+        let employee_count =
+            match self.employee_count.trim() {
+                "" => None,
+                value => Some(value.parse::<u32>().map_err(|_| {
+                    AppError::BadRequest("employees must be a whole number".into())
+                })?),
+            };
         let frameworks = [
             ("soc2", self.soc2),
             ("nist_csf", self.nist_csf),
