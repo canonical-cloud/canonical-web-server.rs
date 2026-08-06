@@ -1,0 +1,42 @@
+name: apply owner context boundary
+
+on:
+  push:
+    branches:
+      - agent/quote-api-integration-v2
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out integration branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/quote-api-integration-v2
+
+      - name: Remove browser context selection
+        run: python3 .bootstrap/remove_client_context_selector.py
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy
+
+      - name: Format and verify workspace
+        run: |
+          set -euo pipefail
+          cargo +1.95.0 fmt --all
+          cargo +1.95.0 test --workspace --all-targets --all-features --locked
+          cargo +1.95.0 clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: Commit verified boundary
+        run: |
+          set -euo pipefail
+          git config user.name 'canonical-implementation-bot'
+          git config user.email 'canonical-implementation-bot@users.noreply.github.com'
+          git add src/quote_api.rs .env.example README.md tests/gemini_model_contract.rs
+          git commit -m 'fix: let the API select owner context'
+          git push origin HEAD:agent/quote-api-integration-v2
