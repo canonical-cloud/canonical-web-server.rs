@@ -15,7 +15,7 @@ const VERIFY_PATH: &str = "/shared-auth/auth/verify";
 const MAX_TOKEN_BYTES: usize = 16 * 1024;
 const MAX_EMAIL_BYTES: usize = 320;
 
-/// Origin-side verifier for the first-party Shared Auth browser cookie.
+/// Origin-side verifier for first-party Shared Auth access tokens.
 ///
 /// The Cloudflare Worker performs the same check before forwarding protected
 /// traffic, but this verifier is deliberately independent: caller-supplied
@@ -78,7 +78,20 @@ impl SharedAuthVerifier {
         &self.cookie_name
     }
 
-    pub async fn authenticate(&self, token: &str) -> Result<AuthContext, AppError> {
+    pub async fn authenticate_session(&self, token: &str) -> Result<AuthContext, AppError> {
+        self.authenticate_as(token, CredentialSource::SessionCookie)
+            .await
+    }
+
+    pub async fn authenticate_bearer(&self, token: &str) -> Result<AuthContext, AppError> {
+        self.authenticate_as(token, CredentialSource::Bearer).await
+    }
+
+    async fn authenticate_as(
+        &self,
+        token: &str,
+        source: CredentialSource,
+    ) -> Result<AuthContext, AppError> {
         if token.is_empty() || token.len() > MAX_TOKEN_BYTES {
             return Err(AppError::Unauthorized);
         }
@@ -116,12 +129,19 @@ impl SharedAuthVerifier {
         Ok(AuthContext {
             user_id,
             email,
-            source: CredentialSource::SessionCookie,
+            source,
             supabase_session_id: None,
             session_hash: Some(token_fingerprint(token)),
-            csrf_token: Some(self.csrf_token(token)),
+            csrf_token: self.csrf_token_for_source(token, source),
             expires_at: verified_expiry(token),
         })
+    }
+
+    fn csrf_token_for_source(&self, token: &str, source: CredentialSource) -> Option<String> {
+        match source {
+            CredentialSource::SessionCookie => Some(self.csrf_token(token)),
+            CredentialSource::Bearer => None,
+        }
     }
 
     fn csrf_token(&self, token: &str) -> String {
@@ -241,6 +261,17 @@ mod tests {
             verifier.csrf_token("token-a"),
             verifier.csrf_token("token-b")
         );
+    }
+
+    #[test]
+    fn csrf_is_only_issued_for_cookie_credentials() {
+        let verifier = verifier();
+        assert!(verifier
+            .csrf_token_for_source("token-a", CredentialSource::SessionCookie)
+            .is_some());
+        assert!(verifier
+            .csrf_token_for_source("token-a", CredentialSource::Bearer)
+            .is_none());
     }
 
     #[test]
