@@ -1,5 +1,3 @@
-mod quotes;
-
 use crate::{
     auth::{require_csrf, require_origin, Authenticated, CredentialSource},
     error::AppError,
@@ -22,9 +20,6 @@ pub fn router() -> Router<AppState> {
         .route("/me", get(me))
         .route("/sync/changes", get(pull))
         .route("/sync/mutations", post(push))
-        .route("/quotes", get(quotes::list).post(quotes::create))
-        .route("/quotes/ws", get(quotes::websocket))
-        .route("/quotes/{id}", get(quotes::get))
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .fallback(not_found);
 
