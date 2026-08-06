@@ -1,4 +1,4 @@
-name: rkyv dependency path diagnostic
+name: rkyv dependency and lockfile diagnostic
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ permissions:
 jobs:
   dependency-path:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -20,5 +20,35 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: "1.95.0"
-      - name: Print inverse rkyv feature tree
-        run: cargo tree --locked --workspace --all-targets --invert rkyv@0.7.46 --edges features
+      - name: Inspect the committed dependency graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum Cargo.lock
+          echo '--- current host graph ---'
+          cargo tree --locked --workspace --invert rkyv@0.7.46 --edges features || true
+          echo '--- all target graph ---'
+          cargo tree --locked --workspace --target all --invert rkyv@0.7.46 --edges features || true
+      - name: Regenerate the lockfile without modifying the repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp Cargo.lock "$RUNNER_TEMP/Cargo.lock.original"
+          cargo generate-lockfile
+          sha256sum Cargo.lock
+          echo '--- lockfile diff summary ---'
+          git diff --stat -- Cargo.lock || true
+          echo '--- rkyv entries after regeneration ---'
+          grep -n -A8 -B2 '^name = "rkyv"$' Cargo.lock || true
+          echo '--- regenerated current host graph ---'
+          cargo tree --locked --workspace --invert rkyv@0.7.46 --edges features || true
+          echo '--- regenerated all target graph ---'
+          cargo tree --locked --workspace --target all --invert rkyv@0.7.46 --edges features || true
+          cp Cargo.lock "$RUNNER_TEMP/Cargo.lock.regenerated"
+      - name: Upload regenerated lockfile
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: regenerated-cargo-lock-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/Cargo.lock.regenerated
+          retention-days: 1
+          if-no-files-found: error
