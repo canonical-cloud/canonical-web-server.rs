@@ -60,9 +60,7 @@ pub async fn submit(
 ) -> Response {
     let actor = match auth {
         Ok(QuoteSessionAuthenticated(actor)) => actor,
-        Err(AppError::Unauthorized) => {
-            return htmx_or_browser_auth_redirect(&headers, &state)
-        }
+        Err(AppError::Unauthorized) => return htmx_or_browser_auth_redirect(&headers, &state),
         Err(error) => return error.into_response(),
     };
     if let Err(error) = require_origin(&headers, &state) {
