@@ -100,13 +100,47 @@ jobs:
               exit 1
             fi
           fi
+      - name: Assert vulnerable rkyv is not in the resolved build graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          # RUSTSEC-2026-0235 affects rkyv 0.7.46. Cargo-audit scans every
+          # package retained in Cargo.lock, including unreachable historical
+          # resolver entries, so prove absence from Cargo's resolved graph
+          # before applying the narrowly scoped audit ignore below.
+          cargo metadata --locked --format-version 1 > /tmp/cargo-metadata.json
+          python3 <<'PY'
+          import json
+          from pathlib import Path
+
+          metadata = json.loads(Path("/tmp/cargo-metadata.json").read_text())
+          resolved = {
+              node["id"]
+              for node in (metadata.get("resolve") or {}).get("nodes", [])
+          }
+          offenders = [
+              package
+              for package in metadata.get("packages", [])
+              if package["id"] in resolved
+              and package["name"] == "rkyv"
+              and package["version"] == "0.7.46"
+          ]
+          if offenders:
+              raise SystemExit(
+                  "vulnerable rkyv 0.7.46 entered the resolved dependency graph"
+              )
+          print("rkyv 0.7.46 is absent from the resolved dependency graph")
+          PY
       - name: Audit Rust dependencies
         shell: bash
         run: |
           # RUSTSEC-2026-0173: unmaintained (not vulnerable) compile-time-only
           # proc-macro-error2, currently required by SeaORM's derive macros.
+          # RUSTSEC-2026-0235: unreachable lockfile-only rkyv entry, guarded by
+          # the resolved-graph assertion above.
           cargo audit --deny warnings \
-            --ignore RUSTSEC-2026-0173
+            --ignore RUSTSEC-2026-0173 \
+            --ignore RUSTSEC-2026-0235
 
   postgres-rls:
     runs-on: ubuntu-latest
