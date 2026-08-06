@@ -96,7 +96,9 @@ internal service credential.
 submodule because `@opto-sync/client` is not published to the npm registry. The
 client `prepare` step builds its TypeScript and inlined WebAssembly artifacts
 before typechecking, testing, or bundling. Clone and CI checkouts must therefore
-initialize submodules recursively.
+initialize submodules recursively. The opto-sync adapter and WASM engine are
+dynamic chunks loaded only by the quote page (or logout cleanup), so the normal
+HTMX application shell does not pay their transfer cost.
 
 ## Multi-instance invalidations
 

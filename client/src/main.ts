@@ -1,6 +1,6 @@
 import htmx from "htmx.org";
 import "htmx-ext-ws";
-import { QuoteWriteQueue, wireQuoteOptimisticWrites } from "./quote-optimistic";
+import type { QuoteWriteQueue } from "./quote-optimistic";
 import { CanonicalSyncClient, type CanonicalSyncClientOptions } from "./sync";
 
 declare global {
@@ -46,6 +46,7 @@ async function clearQuoteWrites(): Promise<void> {
     document.querySelector<HTMLMetaElement>('meta[name="canonical-quote-account"]')?.content ??
     document.querySelector<HTMLMetaElement>('meta[name="canonical-account-key"]')?.content;
   if (key !== undefined && key.length > 0) {
+    const { QuoteWriteQueue } = await import("./quote-optimistic");
     const queue = await QuoteWriteQueue.open(key);
     await queue.clearLocalData();
   }
@@ -108,19 +109,22 @@ if (accountKey !== undefined && accountKey.length > 0) {
   void bootstrapCanonicalSync({ accountKey }).then(wireDraftNoteUi);
 }
 
-void wireQuoteOptimisticWrites(htmx)
-  .then((queue) => {
-    if (queue !== undefined) {
-      window.canonicalQuoteWrites = queue;
-    }
-  })
-  .catch(() => {
-    const status = document.querySelector<HTMLElement>("#quote-sync-status");
-    if (status !== null) {
-      status.dataset.state = "failed";
-      status.textContent = "Local optimistic writes are unavailable; reload before submitting.";
-    }
-  });
+if (document.querySelector('form[data-opto-quote="true"]') !== null) {
+  void import("./quote-optimistic")
+    .then(({ wireQuoteOptimisticWrites }) => wireQuoteOptimisticWrites(htmx))
+    .then((queue) => {
+      if (queue !== undefined) {
+        window.canonicalQuoteWrites = queue;
+      }
+    })
+    .catch(() => {
+      const status = document.querySelector<HTMLElement>("#quote-sync-status");
+      if (status !== null) {
+        status.dataset.state = "failed";
+        status.textContent = "Local optimistic writes are unavailable; reload before submitting.";
+      }
+    });
+}
 
 const logoutForm = document.querySelector<HTMLFormElement>('form[action="/auth/logout"]');
 logoutForm?.addEventListener("submit", (event) => {
