@@ -9,6 +9,12 @@ use axum_extra::extract::cookie::CookieJar;
 pub struct Authenticated(pub AuthContext);
 pub struct SessionAuthenticated(pub AuthContext);
 pub struct OptionalAuthenticated(pub Option<AuthContext>);
+/// Accepts the existing Canonical session/bearer transports and, when neither
+/// is present, a browser cookie independently verified by Shared Auth.
+pub struct QuoteAuthenticated(pub AuthContext);
+/// Browser-only quote authentication. Bearer headers are rejected so HTML and
+/// WebSocket routes cannot accidentally change credential semantics.
+pub struct QuoteSessionAuthenticated(pub AuthContext);
 
 impl FromRequestParts<AppState> for Authenticated {
     type Rejection = AppError;
@@ -29,6 +35,28 @@ impl FromRequestParts<AppState> for SessionAuthenticated {
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         Ok(Self(authenticate(parts, state, false).await?))
+    }
+}
+
+impl FromRequestParts<AppState> for QuoteAuthenticated {
+    type Rejection = AppError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(Self(authenticate_quote(parts, state, true).await?))
+    }
+}
+
+impl FromRequestParts<AppState> for QuoteSessionAuthenticated {
+    type Rejection = AppError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(Self(authenticate_quote(parts, state, false).await?))
     }
 }
 
@@ -88,6 +116,35 @@ async fn authenticate(
         .authenticate(raw_id)
         .await
         .map_err(AppError::from)
+}
+
+async fn authenticate_quote(
+    parts: &Parts,
+    state: &AppState,
+    allow_bearer: bool,
+) -> Result<AuthContext, AppError> {
+    // Explicit Authorization and an existing Canonical session both retain
+    // their original fail-closed precedence. An invalid higher-precedence
+    // credential never falls back to a different cookie.
+    if parts.headers.contains_key(header::AUTHORIZATION) {
+        return authenticate(parts, state, allow_bearer).await;
+    }
+
+    let jar = CookieJar::from_headers(&parts.headers);
+    if jar.get(&state.config.session_cookie).is_some() {
+        return authenticate(parts, state, false).await;
+    }
+
+    let token = jar
+        .get(state.shared_auth.cookie_name())
+        .map(|cookie| cookie.value())
+        .ok_or(AppError::Unauthorized)?;
+    let _permit = state
+        .bearer_auth_semaphore
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| AppError::AuthBusy)?;
+    state.shared_auth.authenticate(token).await
 }
 
 pub fn require_origin(headers: &HeaderMap, state: &AppState) -> Result<(), AppError> {
