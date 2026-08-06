@@ -1,7 +1,7 @@
 use crate::{
     auth::{require_csrf, require_origin, QuoteSessionAuthenticated},
     error::AppError,
-    quotes::{self, QuoteRequest},
+    quote_api::{self, QuoteRequest},
     AppState,
 };
 use axum::{
@@ -26,14 +26,18 @@ pub async fn page(
         Err(AppError::Unauthorized) => return shared_auth_redirect(&state).into_response(),
         Err(error) => return error.into_response(),
     };
-    match quotes::list_quotes(&state, actor.user_id, 20).await {
-        Ok(records) => quotes::quote_page(&actor, &records).into_response(),
+    let Some(client) = state.quote_api.as_ref() else {
+        return AppError::ServiceUpstream.into_response();
+    };
+    match client.list(&actor).await {
+        Ok(records) => quote_api::quote_page(&actor, &records).into_response(),
         Err(error) => error.into_response(),
     }
 }
 
 pub async fn detail(
     State(state): State<AppState>,
+    headers: HeaderMap,
     auth: Result<QuoteSessionAuthenticated, AppError>,
     Path(raw_id): Path<String>,
 ) -> Response {
@@ -46,8 +50,14 @@ pub async fn detail(
         Ok(id) => id,
         Err(_) => return AppError::NotFound.into_response(),
     };
-    match quotes::get_quote(&state, actor.user_id, quote_id).await {
-        Ok(record) => quotes::quote_detail_page(&actor, &record).into_response(),
+    let Some(client) = state.quote_api.as_ref() else {
+        return AppError::ServiceUpstream.into_response();
+    };
+    match client.get(&actor, quote_id).await {
+        Ok(record) if headers.contains_key("hx-request") => {
+            quote_api::quote_status_fragment(&record).into_response()
+        }
+        Ok(record) => quote_api::quote_detail_page(&actor, &record).into_response(),
         Err(error) => error.into_response(),
     }
 }
@@ -74,9 +84,12 @@ pub async fn submit(
         Err(AppError::BadRequest(message)) => return form_error(&headers, &message),
         Err(error) => return error.into_response(),
     };
-    match quotes::create_quote(state, actor.user_id, request).await {
+    let Some(client) = state.quote_api.as_ref() else {
+        return AppError::ServiceUpstream.into_response();
+    };
+    match client.create(&actor, &request).await {
         Ok(record) if headers.contains_key("hx-request") => {
-            quotes::quote_status_fragment(&record).into_response()
+            quote_api::quote_status_fragment(&record).into_response()
         }
         Ok(record) => Redirect::to(&format!("/u/quote/{}", record.id)).into_response(),
         Err(AppError::BadRequest(message)) => form_error(&headers, &message),
@@ -87,15 +100,17 @@ pub async fn submit(
 #[derive(Debug, Deserialize)]
 pub struct QuoteForm {
     csrf: String,
-    company: String,
+    company_name: String,
+    industry: String,
+    employee_count: u32,
     #[serde(default)]
-    website: String,
-    #[serde(default)]
-    employee_count: String,
-    #[serde(default)]
-    target_date: String,
+    annual_revenue_usd: String,
+    security_program_maturity: String,
+    target_timeline: String,
     #[serde(default)]
     cloud_providers: String,
+    #[serde(default)]
+    existing_certifications: String,
     #[serde(default)]
     notes: String,
     #[serde(default)]
@@ -115,20 +130,39 @@ pub struct QuoteForm {
     #[serde(default)]
     handles_phi: Option<String>,
     #[serde(default)]
-    handles_card_data: Option<String>,
-    #[serde(default)]
-    government_customers: Option<String>,
+    handles_payment_cards: Option<String>,
 }
 
 impl QuoteForm {
     fn into_request(self) -> Result<QuoteRequest, AppError> {
-        let employee_count =
-            match self.employee_count.trim() {
-                "" => None,
-                value => Some(value.parse::<u32>().map_err(|_| {
-                    AppError::BadRequest("employees must be a whole number".into())
-                })?),
-            };
+        let company_name = self.company_name.trim().to_owned();
+        if company_name.is_empty() || company_name.chars().count() > 200 {
+            return Err(AppError::BadRequest(
+                "company name is required and must be at most 200 characters".into(),
+            ));
+        }
+        let industry = self.industry.trim().to_owned();
+        if industry.is_empty() || industry.chars().count() > 120 {
+            return Err(AppError::BadRequest(
+                "industry is required and must be at most 120 characters".into(),
+            ));
+        }
+        if !(1..=1_000_000).contains(&self.employee_count) {
+            return Err(AppError::BadRequest(
+                "employee count must be between 1 and 1000000".into(),
+            ));
+        }
+        let annual_revenue_usd = match self.annual_revenue_usd.trim() {
+            "" => None,
+            value => Some(value.parse::<u64>().map_err(|_| {
+                AppError::BadRequest("annual revenue must be a whole USD amount".into())
+            })?),
+        };
+        if annual_revenue_usd.is_some_and(|value| value > 10_000_000_000_000) {
+            return Err(AppError::BadRequest(
+                "annual revenue is outside the supported range".into(),
+            ));
+        }
         let frameworks = [
             ("soc2", self.soc2),
             ("nist_csf", self.nist_csf),
@@ -140,32 +174,69 @@ impl QuoteForm {
         ]
         .into_iter()
         .filter_map(|(name, selected)| selected.map(|_| name.to_owned()))
-        .collect();
-        let cloud_providers = self
-            .cloud_providers
-            .split(',')
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned)
-            .collect();
-        QuoteRequest {
-            company: self.company,
-            website: optional(self.website),
-            employee_count,
-            frameworks,
-            cloud_providers,
-            handles_phi: self.handles_phi.is_some(),
-            handles_card_data: self.handles_card_data.is_some(),
-            government_customers: self.government_customers.is_some(),
-            target_date: optional(self.target_date),
-            notes: optional(self.notes),
+        .collect::<Vec<_>>();
+        if frameworks.is_empty() {
+            return Err(AppError::BadRequest(
+                "choose at least one supported framework".into(),
+            ));
         }
-        .validated()
+        if !matches!(
+            self.security_program_maturity.as_str(),
+            "none" | "informal" | "documented" | "managed" | "audited"
+        ) {
+            return Err(AppError::BadRequest(
+                "choose a supported security program maturity".into(),
+            ));
+        }
+        if !matches!(
+            self.target_timeline.as_str(),
+            "under_3_months"
+                | "3_to_6_months"
+                | "6_to_12_months"
+                | "over_12_months"
+                | "unsure"
+        ) {
+            return Err(AppError::BadRequest(
+                "choose a supported target timeline".into(),
+            ));
+        }
+        let notes = optional(self.notes);
+        if notes.as_deref().is_some_and(|value| value.len() > 4_000) {
+            return Err(AppError::BadRequest(
+                "notes must be at most 4000 characters".into(),
+            ));
+        }
+
+        Ok(QuoteRequest {
+            company_name,
+            industry,
+            employee_count: self.employee_count,
+            annual_revenue_usd,
+            frameworks,
+            cloud_providers: split_list(&self.cloud_providers, 8, 80),
+            handles_phi: self.handles_phi.is_some(),
+            handles_payment_cards: self.handles_payment_cards.is_some(),
+            security_program_maturity: self.security_program_maturity,
+            target_timeline: self.target_timeline,
+            existing_certifications: split_list(&self.existing_certifications, 16, 120),
+            notes,
+        })
     }
 }
 
+fn split_list(value: &str, maximum_entries: usize, maximum_length: usize) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .take(maximum_entries)
+        .map(|value| value.chars().take(maximum_length).collect())
+        .collect()
+}
+
 fn optional(value: String) -> Option<String> {
-    (!value.trim().is_empty()).then_some(value)
+    let value = value.trim().to_owned();
+    (!value.is_empty()).then_some(value)
 }
 
 fn shared_auth_sign_in_url(app_base_url: &str) -> reqwest::Url {
@@ -175,6 +246,7 @@ fn shared_auth_sign_in_url(app_base_url: &str) -> reqwest::Url {
     destination.set_query(None);
     destination
         .query_pairs_mut()
+        .append_pair("client_id", "canonical-web")
         .append_pair("return", QUOTE_RETURN_PATH);
     destination
 }
@@ -215,45 +287,52 @@ mod tests {
     use super::*;
 
     #[test]
-    fn form_maps_selected_frameworks_and_clouds() {
+    fn form_maps_selected_frameworks_and_scope() {
         let form = QuoteForm {
             csrf: "csrf".into(),
-            company: "Example".into(),
-            website: "https://example.com".into(),
-            employee_count: "15".into(),
-            target_date: "2027-02-01".into(),
-            cloud_providers: "aws, cloudflare".into(),
+            company_name: "Example".into(),
+            industry: "Software".into(),
+            employee_count: 15,
+            annual_revenue_usd: "1000000".into(),
+            security_program_maturity: "documented".into(),
+            target_timeline: "3_to_6_months".into(),
+            cloud_providers: "AWS, Cloudflare".into(),
+            existing_certifications: String::new(),
             notes: String::new(),
-            soc2: Some("true".into()),
+            soc2: Some("on".into()),
             nist_csf: None,
             nist_800_53: None,
-            hipaa: Some("true".into()),
+            hipaa: Some("on".into()),
             iso_27001: None,
             fedramp: None,
             pci_dss: None,
-            handles_phi: Some("true".into()),
-            handles_card_data: None,
-            government_customers: None,
+            handles_phi: Some("on".into()),
+            handles_payment_cards: None,
         };
         let request = form.into_request().unwrap();
-        assert_eq!(request.frameworks, ["hipaa", "soc2"]);
-        assert_eq!(request.cloud_providers, ["aws", "cloudflare"]);
+        assert_eq!(request.frameworks, ["soc2", "hipaa"]);
+        assert_eq!(request.cloud_providers, ["AWS", "Cloudflare"]);
         assert!(request.handles_phi);
     }
 
     #[test]
     fn auth_return_target_is_same_origin_and_relative() {
         let destination = shared_auth_sign_in_url("https://app.canonical.plus");
-        assert_eq!(
-            destination.as_str(),
-            "https://app.canonical.plus/shared-auth/auth/browser/sign-in?return=%2Fu%2Fquote"
-        );
+        assert_eq!(destination.host_str(), Some("app.canonical.plus"));
+        assert_eq!(destination.path(), SHARED_AUTH_BROWSER_SIGN_IN_PATH);
         assert_eq!(
             destination
                 .query_pairs()
                 .find(|(name, _)| name == "return")
                 .map(|(_, value)| value.into_owned()),
             Some(QUOTE_RETURN_PATH.into())
+        );
+        assert_eq!(
+            destination
+                .query_pairs()
+                .find(|(name, _)| name == "client_id")
+                .map(|(_, value)| value.into_owned()),
+            Some("canonical-web".into())
         );
     }
 }
