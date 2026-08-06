@@ -1,9 +1,0 @@
-[advisories]
-# RUSTSEC-2026-0235 applies to rkyv 0.7.46 present in Cargo.lock through
-# inactive dependency metadata. `.github/workflows/rkyv-active-graph.yml`
-# fails closed if that version becomes reachable in the default, all-target,
-# or all-features/all-target workspace graph. Remove this exception as soon as
-# the upstream lockfile chain can move to rkyv >= 0.8.17.
-ignore = [
-  "RUSTSEC-2026-0235",
-]
