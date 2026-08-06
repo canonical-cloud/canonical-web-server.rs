@@ -79,63 +79,55 @@ jobs:
 
           test = Path("tests/modularization.rs")
           text = test.read_text()
-          old = '''    for (marker, owner) in [
-              ("Config::from_env", "src/command.rs"),
-          '''
-          new = '''    // Each independently deployable server binary loads the shared runtime
-              // configuration before entering its own server boundary.
-              assert_exact_owners(
-                  "Config::from_env",
-                  &["src/bin/canonical-api-server.rs", "src/command.rs"],
-              );
-          
-              for (marker, owner) in [
-          '''
-          if old not in text:
-              raise SystemExit("unexpected Config ownership assertion")
-          test.write_text(text.replace(old, new, 1))
+          owner_line = '        ("Config::from_env", "src/command.rs"),\n'
+          loop_anchor = '    for (marker, owner) in [\n'
+          if text.count(owner_line) != 1 or text.count(loop_anchor) != 1:
+              raise SystemExit("unexpected Config ownership contract")
+          text = text.replace(owner_line, "", 1)
+          declaration = "\n".join([
+              "    // Each independently deployable server binary loads the shared runtime",
+              "    // configuration before entering its own server boundary.",
+              "    assert_exact_owners(",
+              '        "Config::from_env",',
+              '        &["src/bin/canonical-api-server.rs", "src/command.rs"],',
+              "    );",
+              "",
+          ])
+          test.write_text(text.replace(loop_anchor, declaration + loop_anchor, 1))
 
           workflow = Path(".github/workflows/ci.yml")
           text = workflow.read_text()
-          old_start = '''      - name: Assert vulnerable rkyv is not in the resolved build graph
-              shell: bash
-              run: |
-                set -euo pipefail
-                # RUSTSEC-2026-0235 affects rkyv 0.7.46. Cargo-audit scans every
-                # package retained in Cargo.lock, including unreachable historical
-                # resolver entries, so prove absence from Cargo's resolved graph
-                # before applying the narrowly scoped audit ignore below.
-                cargo metadata --locked --format-version 1 > /tmp/cargo-metadata.json
-                python3 <<'PY'
-          '''
-          if old_start not in text:
-              raise SystemExit("existing rkyv guard start was not found")
-          start = text.index(old_start)
+          start_marker = "      - name: Assert vulnerable rkyv is not in the resolved build graph\n"
           audit_marker = "      - name: Audit Rust dependencies\n"
+          if start_marker not in text or audit_marker not in text:
+              raise SystemExit("existing rkyv audit contract was not found")
+          start = text.index(start_marker)
           end = text.index(audit_marker, start)
-          new_guard = '''      - name: Assert vulnerable rkyv is not in the active Linux build graph
-              shell: bash
-              run: |
-                set -euo pipefail
-                # RUSTSEC-2026-0235 affects rkyv 0.7.46. Cargo retains optional
-                # packages in Cargo.lock and metadata even when their activating
-                # feature is disabled. Prove that the production Linux target has
-                # no normal, build, or dev path before the narrow audit exception.
-                active_path="$(cargo tree \\
-                  --workspace \\
-                  --locked \\
-                  --target x86_64-unknown-linux-gnu \\
-                  --invert rkyv@0.7.46 \\
-                  --edges normal,build,dev \\
-                  --prefix none 2>/dev/null || true)"
-                if [ -n "$active_path" ]; then
-                  printf '%s\\n' "$active_path" >&2
-                  echo "vulnerable rkyv entered the active Linux dependency graph" >&2
-                  exit 1
-                fi
-                echo "rkyv 0.7.46 is absent from the active Linux dependency graph"
-          '''
-          text = text[:start] + new_guard + text[end:]
+          guard_lines = [
+              "      - name: Assert vulnerable rkyv is not in the active Linux build graph",
+              "        shell: bash",
+              "        run: |",
+              "          set -euo pipefail",
+              "          # RUSTSEC-2026-0235 affects rkyv 0.7.46. Cargo retains optional",
+              "          # packages in Cargo.lock and metadata even when their activating",
+              "          # feature is disabled. Prove that the production Linux target has",
+              "          # no normal, build, or dev path before the narrow audit exception.",
+              '          active_path="$(cargo tree \\',
+              "            --workspace \\",
+              "            --locked \\",
+              "            --target x86_64-unknown-linux-gnu \\",
+              "            --invert rkyv@0.7.46 \\",
+              "            --edges normal,build,dev \\",
+              '            --prefix none 2>/dev/null || true)"',
+              '          if [ -n "$active_path" ]; then',
+              "            printf '%s\\n' \"$active_path\" >&2",
+              '            echo "vulnerable rkyv entered the active Linux dependency graph" >&2',
+              "            exit 1",
+              "          fi",
+              '          echo "rkyv 0.7.46 is absent from the active Linux dependency graph"',
+              "",
+          ]
+          text = text[:start] + "\n".join(guard_lines) + text[end:]
           text = text.replace(
               "# the resolved-graph assertion above.",
               "# the active Linux graph assertion above.",
