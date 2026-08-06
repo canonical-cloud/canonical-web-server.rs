@@ -200,10 +200,7 @@ impl QuoteRequest {
             ),
             format!("Requested timeline: {}", self.target_timeline),
             format!("Handles protected health information: {}", self.handles_phi),
-            format!(
-                "Handles payment-card data: {}",
-                self.handles_payment_cards
-            ),
+            format!("Handles payment-card data: {}", self.handles_payment_cards),
         ];
         if let Some(revenue) = self.annual_revenue_usd {
             lines.push(format!("Annual revenue USD: {revenue}"));
