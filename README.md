@@ -40,7 +40,7 @@ credentials or the server's Supabase token pair.
 - `src/telemetry.rs` — JSON stdout logs for Promtail/Loki plus explicit OTLP
   HTTP spans and low-cardinality metrics for the collector/Prometheus.
 - `src/routes/` — probes, Maud/HTMX pages, signed-in quote workflow, versioned REST, and authenticated
-  WebSocket upgrade handling. `/u/quote` verifies the Cloudflare edge HMAC and re-signs only the internal quote API request.
+  WebSocket upgrade handling. `/u/quote` verifies the Cloudflare edge HMAC and uses a distinct, rotated service credential only for the internal quote API request.
 - `src/sync/` — compare-and-swap mutations, durable idempotency, tombstones,
   owner-bound encrypted cursors, and pull pagination.
 - `src/ws/` — owner-scoped in-process fanout plus a bounded PostgreSQL
@@ -67,6 +67,7 @@ new kind only with matching validation, authorization, schema, and merge rules.
 | `POST` | `/auth/logout` | CSRF-protected local/Supabase logout |
 | `GET` | `/app` | Authenticated Maud application shell |
 | `GET`, `POST` | `/u/quote` | Edge-authenticated Maud/HTMX quote workflow |
+| `GET` | `/u/quote/{quote_id}` | Owner-scoped HTMX quote status fragment |
 | `GET` | `/app/fragments/session` | HTMX session fragment |
 | `GET` | `/api/v1/{health,info,me}` | Versioned REST metadata/current user |
 | `GET` | `/api/v1/sync/changes` | Incremental authoritative pull |
