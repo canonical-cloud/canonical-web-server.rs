@@ -1,0 +1,55 @@
+name: rkyv active dependency graph
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rkyv-active-graph-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  active-graph:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: "1.95.0"
+
+      - name: Reject active vulnerable rkyv 0.7 graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! grep -q '^name = "rkyv"$' Cargo.lock; then
+            echo 'rkyv is absent from Cargo.lock'
+            exit 0
+          fi
+
+          set +e
+          graph="$(cargo tree --workspace --invert rkyv 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$graph"
+
+          if [ "$status" -eq 0 ]; then
+            echo 'rkyv is reachable from the active workspace dependency graph' >&2
+            exit 1
+          fi
+          if ! grep -Fq 'did not match any packages' <<<"$graph"; then
+            echo "cargo tree failed unexpectedly with status $status" >&2
+            exit "$status"
+          fi
+
+          echo 'verified: rkyv is lockfile-only and absent from the active workspace graph'
