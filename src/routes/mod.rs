@@ -1,6 +1,8 @@
 mod auth;
 mod health;
 mod pages;
+mod quote;
+mod shared_auth;
 mod websocket;
 
 pub mod api;
@@ -30,6 +32,9 @@ pub fn router(state: AppState) -> Router {
     let private_application = Router::new()
         .route("/login", get(auth::login_page))
         .route("/ws", axum::routing::any(websocket::upgrade))
+        .route("/auth/shared/start", get(shared_auth::start))
+        .route("/auth/shared/callback", get(shared_auth::callback))
+        .nest("/u/quote", quote::router())
         .nest("/api", api::router())
         .nest("/auth", auth::router())
         .nest("/app", pages::router())
