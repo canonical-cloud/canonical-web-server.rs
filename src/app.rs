@@ -28,6 +28,7 @@ pub(crate) struct QuoteClient {
     pub http: reqwest::Client,
     pub maximum_assertion_age_seconds: i64,
     pub origin_assertion_secret: Vec<u8>,
+    pub web_service_token: String,
 }
 
 impl QuoteClient {
@@ -56,6 +57,13 @@ impl QuoteClient {
                 "ORIGIN_ASSERTION_SECRET must contain at least 32 bytes",
             ));
         }
+        let web_service_token = env::var("CANONICAL_WEB_SERVICE_TOKEN")
+            .map_err(|_| AppError::Configuration("CANONICAL_WEB_SERVICE_TOKEN is required"))?;
+        if web_service_token.len() < 32 || web_service_token.trim() != web_service_token {
+            return Err(AppError::Configuration(
+                "CANONICAL_WEB_SERVICE_TOKEN must contain at least 32 non-whitespace-trimmed bytes",
+            ));
+        }
         let maximum_assertion_age_seconds = env::var("ORIGIN_ASSERTION_MAX_AGE_SECONDS")
             .unwrap_or_else(|_| "30".to_owned())
             .parse::<i64>()
@@ -78,6 +86,7 @@ impl QuoteClient {
             http,
             maximum_assertion_age_seconds,
             origin_assertion_secret: secret,
+            web_service_token,
         })
     }
 }
