@@ -196,7 +196,7 @@ mod tests {
             parse_roles(&headers).unwrap(),
             vec!["customer", "quote:read", "quote.write"]
         );
-        headers.insert(ROLES_HEADER, "customer,admin\nspoof".parse().unwrap());
+        headers.insert(ROLES_HEADER, "customer,admin/spoof".parse().unwrap());
         assert!(parse_roles(&headers).is_err());
     }
 }
