@@ -1,0 +1,42 @@
+name: apply quote API integration
+
+on:
+  push:
+    branches:
+      - agent/quote-api-integration-v2
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out integration branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/quote-api-integration-v2
+
+      - name: Apply dedicated API boundary
+        run: python3 .bootstrap/apply_quote_api_integration.py
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy
+
+      - name: Format and verify Rust
+        run: |
+          set -euo pipefail
+          cargo +1.95.0 fmt --all
+          cargo +1.95.0 test --workspace --all-targets --all-features --locked
+          cargo +1.95.0 clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: Commit source-only integration
+        run: |
+          set -euo pipefail
+          git config user.name 'canonical-implementation-bot'
+          git config user.email 'canonical-implementation-bot@users.noreply.github.com'
+          git add .env.example README.md src tests/gemini_model_contract.rs
+          git commit -m 'feat: delegate quote analysis to canonical API'
+          git push origin HEAD:agent/quote-api-integration-v2
