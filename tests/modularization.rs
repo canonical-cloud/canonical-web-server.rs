@@ -60,12 +60,20 @@ fn owners(marker: &str) -> Vec<String> {
         .collect()
 }
 
-fn assert_single_owner(marker: &str, expected: &str) {
+fn assert_exact_owners(marker: &str, expected: &[&str]) {
+    let expected = expected
+        .iter()
+        .map(|owner| (*owner).to_owned())
+        .collect::<Vec<_>>();
     assert_eq!(
         owners(marker),
-        [expected],
-        "{marker:?} must have exactly one architectural owner"
+        expected,
+        "{marker:?} must have exactly the declared architectural owners"
     );
+}
+
+fn assert_single_owner(marker: &str, expected: &str) {
+    assert_exact_owners(marker, &[expected]);
 }
 
 #[test]
@@ -106,9 +114,15 @@ fn every_top_level_module_is_registered_exactly_once() {
 }
 
 #[test]
-fn runtime_side_effects_keep_exactly_one_owner() {
+fn runtime_side_effects_keep_explicit_owners() {
+    // Both independently deployable executable roots initialize their own
+    // telemetry subscriber before entering shared library code.
+    assert_exact_owners(
+        "telemetry::init",
+        &["src/bin/canonical-api-server.rs", "src/main.rs"],
+    );
+
     for (marker, owner) in [
-        ("telemetry::init", "src/main.rs"),
         ("Config::from_env", "src/command.rs"),
         ("MigrationConfig::from_env", "src/command.rs"),
         ("crate::db::connect_database", "src/database.rs"),
