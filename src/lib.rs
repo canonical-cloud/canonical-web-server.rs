@@ -8,6 +8,9 @@ pub mod command;
 pub mod database;
 pub mod error;
 pub mod metrics;
+// Axum's ping/pong branch is intentionally explicit so a successful pong
+// falls through while a failed send terminates the socket loop.
+#[allow(clippy::collapsible_match)]
 pub mod quotes;
 pub mod routes;
 pub mod server;
