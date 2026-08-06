@@ -1,4 +1,4 @@
-name: Diagnose Canonical PR 41 exact head
+name: Test Canonical SeaORM migration feature patch
 
 on:
   push:
@@ -10,11 +10,12 @@ permissions:
   contents: read
 
 jobs:
-  dependency-path:
+  dependency-fix:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 40
     env:
-      RELEASE_SHA: 055b6fb224c705d07fd93dd66970fb6cf3d07c17
+      RELEASE_SHA: 459d18e8248de7802c82b280232977cdf7c517cb
+      SEA_ORM_SHA: fd3d3de8a37df4ff790ff1661bb572b9ec1350d0
     steps:
       - name: Check out immutable release SHA
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -25,18 +26,81 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
           toolchain: "1.95.0"
+          components: rustfmt,clippy
       - name: Assert immutable source head
         run: test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
-      - name: Show resolved rkyv path and features
+      - name: Vendor the exact upstream migration crate with defaults disabled
         shell: bash
         run: |
           set -euo pipefail
-          echo '=== reverse normal/build/dev path ==='
-          cargo tree --workspace --locked --invert rkyv@0.7.46 --edges normal,build,dev
-          echo '=== reverse feature path ==='
-          cargo tree --workspace --locked --invert rkyv@0.7.46 --edges features
-          echo '=== rust_decimal feature path ==='
-          cargo tree --workspace --locked --invert rust_decimal --edges features || true
-          echo '=== packages mentioning rkyv in resolved metadata ==='
+          git clone --quiet --filter=blob:none --no-checkout https://github.com/SeaQL/sea-orm.git /tmp/sea-orm
+          git -C /tmp/sea-orm checkout --quiet "$SEA_ORM_SHA"
+          test "$(git -C /tmp/sea-orm rev-parse HEAD)" = "$SEA_ORM_SHA"
+          mkdir -p vendor
+          cp -R /tmp/sea-orm/sea-orm-migration vendor/sea-orm-migration
+          python3 <<'PY'
+          from pathlib import Path
+
+          manifest = Path("vendor/sea-orm-migration/Cargo.toml")
+          text = manifest.read_text()
+          old = '''sea-orm = { version = "~2.0.0", path = "../", features = [
+              "schema-sync",
+          ] }'''
+          new = '''sea-orm = { version = "~2.0.0", default-features = false, features = [
+              "schema-sync",
+          ] }'''
+          if old not in text:
+              raise SystemExit("unexpected upstream sea-orm dependency declaration")
+          text = text.replace(old, new, 1)
+          text = text.replace(
+              'sea-orm-cli = { version = "~2.0.0", path = "../sea-orm-cli", default-features = false, optional = true }',
+              'sea-orm-cli = { version = "~2.0.0", default-features = false, optional = true }',
+              1,
+          )
+          manifest.write_text(text)
+
+          root = Path("Cargo.toml")
+          text = root.read_text()
+          if "[patch.crates-io]" in text:
+              raise SystemExit("root manifest already has a crates.io patch section")
+          root.write_text(
+              text.rstrip()
+              + "\n\n[patch.crates-io]\n"
+              + 'sea-orm-migration = { path = "vendor/sea-orm-migration" }\n'
+          )
+          PY
+          cargo update -p sea-orm-migration@2.0.0 --precise 2.0.0
+          git diff --check
+      - name: Prove the vulnerable archive stack is absent
+        shell: bash
+        run: |
+          set -euo pipefail
           cargo metadata --locked --format-version 1 > /tmp/cargo-metadata.json
-          jq -r '.packages[] | select(.name == "rkyv" or .name == "rust_decimal" or .name == "sea-orm" or .name == "sea-query") | [.name,.version,.id] | @tsv' /tmp/cargo-metadata.json
+          if jq -e '.packages[] | select(.name == "rkyv" and .version == "0.7.46")' /tmp/cargo-metadata.json >/dev/null; then
+            cargo tree --workspace --locked --invert rkyv@0.7.46 --edges features || true
+            echo "rkyv 0.7.46 remains in the resolved dependency graph" >&2
+            exit 1
+          fi
+          if grep -Fq 'name = "rkyv"' Cargo.lock; then
+            echo "stale rkyv packages remain in Cargo.lock" >&2
+            exit 1
+          fi
+          cargo tree --workspace --locked --edges normal,build,dev > /tmp/dependency-tree.txt
+          ! grep -Fq 'rust_decimal' /tmp/dependency-tree.txt
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Check
+        run: cargo check --workspace --all-targets --locked
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --workspace --all-targets --locked
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.2
+      - name: RustSec audit without an rkyv exception
+        run: cargo audit --deny warnings --ignore RUSTSEC-2026-0173
+      - name: Summarize patch footprint
+        if: always()
+        run: |
+          git status --short
+          git diff --stat
