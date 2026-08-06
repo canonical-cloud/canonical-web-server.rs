@@ -94,50 +94,43 @@ jobs:
           # package is absent under SQLx 0.9, but keep a fail-closed graph check
           # in case a future lockfile brings it back.
           if grep -q '^name = "rsa"$' Cargo.lock; then
-            rsa_path="$(cargo tree --workspace --invert rsa 2>/dev/null)"
+            rsa_path="$(cargo tree --workspace --target all --invert rsa 2>/dev/null)"
             if [ -n "$rsa_path" ]; then
-              echo "rsa unexpectedly entered the active dependency graph" >&2
+              echo "rsa unexpectedly entered an all-target dependency graph" >&2
+              printf '%s\n' "$rsa_path" >&2
               exit 1
             fi
           fi
-      - name: Assert vulnerable rkyv is not in the resolved build graph
+      - name: Assert vulnerable rkyv is absent from every target graph
         shell: bash
         run: |
           set -euo pipefail
-          # RUSTSEC-2026-0235 affects rkyv 0.7.46. Cargo-audit scans every
-          # package retained in Cargo.lock, including unreachable historical
-          # resolver entries, so prove absence from Cargo's resolved graph
-          # before applying the narrowly scoped audit ignore below.
-          cargo metadata --locked --format-version 1 > /tmp/cargo-metadata.json
-          python3 <<'PY'
-          import json
-          from pathlib import Path
-
-          metadata = json.loads(Path("/tmp/cargo-metadata.json").read_text())
-          resolved = {
-              node["id"]
-              for node in (metadata.get("resolve") or {}).get("nodes", [])
-          }
-          offenders = [
-              package
-              for package in metadata.get("packages", [])
-              if package["id"] in resolved
-              and package["name"] == "rkyv"
-              and package["version"] == "0.7.46"
-          ]
-          if offenders:
-              raise SystemExit(
-                  "vulnerable rkyv 0.7.46 entered the resolved dependency graph"
-              )
-          print("rkyv 0.7.46 is absent from the resolved dependency graph")
-          PY
+          # RUSTSEC-2026-0235 affects rkyv 0.7.46. An upstream optional
+          # rust_decimal edge keeps that package in Cargo.lock even after a
+          # fresh `cargo generate-lockfile`, while Cargo's host and all-target
+          # dependency trees contain no path to it. Cargo-audit scans the whole
+          # lockfile, so this fail-closed all-target graph assertion must pass
+          # before the narrowly scoped advisory ignore below is allowed.
+          stderr="$(mktemp)"
+          if ! graph="$(cargo tree --locked --workspace --target all \
+            --invert rkyv@0.7.46 2>"$stderr")"; then
+            cat "$stderr" >&2
+            exit 1
+          fi
+          cat "$stderr"
+          if [ -n "$(printf '%s' "$graph" | tr -d '[:space:]')" ]; then
+            echo "vulnerable rkyv 0.7.46 entered an all-target dependency graph" >&2
+            printf '%s\n' "$graph" >&2
+            exit 1
+          fi
+          echo "rkyv 0.7.46 is lockfile-only and absent from all target graphs"
       - name: Audit Rust dependencies
         shell: bash
         run: |
           # RUSTSEC-2026-0173: unmaintained (not vulnerable) compile-time-only
           # proc-macro-error2, currently required by SeaORM's derive macros.
-          # RUSTSEC-2026-0235: unreachable lockfile-only rkyv entry, guarded by
-          # the resolved-graph assertion above.
+          # RUSTSEC-2026-0235: lockfile-only optional rkyv edge, guarded by the
+          # all-target Cargo tree assertion immediately above.
           cargo audit --deny warnings \
             --ignore RUSTSEC-2026-0173 \
             --ignore RUSTSEC-2026-0235
