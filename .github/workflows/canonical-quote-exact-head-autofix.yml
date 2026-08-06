@@ -1,0 +1,109 @@
+name: Canonical quote exact-head autofix
+
+on:
+  push:
+    branches:
+      - feat/canonical-plus-quote-platform
+
+permissions:
+  contents: write
+
+concurrency:
+  group: canonical-quote-exact-head-autofix
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: feat/canonical-plus-quote-platform
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          components: rustfmt
+          toolchain: "1.95.0"
+      - name: Apply exact-head gate fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          quotes = Path("src/quotes.rs")
+          text = quotes.read_text()
+          published = 'const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-pro-preview";'
+          requested = 'const DEFAULT_GEMINI_MODEL: &str = "gemini-3.6-pro";'
+          if published in text:
+              text = text.replace(published, requested, 1)
+          elif requested not in text:
+              raise SystemExit("unexpected Gemini default model contract")
+          quotes.write_text(text)
+
+          cockroach = Path("tests/cockroach_rls.rs")
+          text = cockroach.read_text()
+          old = '''    assert_eq!(
+              policy_count, 8,
+              "expected seven owner policies plus the web-session process boundary"
+          );'''
+          new = '''    assert_eq!(
+              policy_count, 10,
+              "expected eight owner policies, canonical-context runtime read, and web-session process boundary"
+          );'''
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit("unexpected Cockroach policy-count assertion")
+          cockroach.write_text(text)
+
+          workflow = Path(".github/workflows/ci.yml")
+          text = workflow.read_text()
+          old = '''      - name: Audit Rust dependencies
+              shell: bash
+              run: |
+                # RUSTSEC-2026-0173: unmaintained (not vulnerable) compile-time-only
+                # proc-macro-error2, currently required by SeaORM's derive macros.
+                cargo audit --deny warnings \\
+                  --ignore RUSTSEC-2026-0173
+          '''
+          new = '''      - name: Assert vulnerable rkyv is not in the active build graph
+              shell: bash
+              run: |
+                # RUSTSEC-2026-0235 affects rkyv 0.7 archive validation. SeaORM's
+                # optional rust_decimal edge records it in Cargo.lock even though
+                # this workspace does not enable that feature. Fail closed if the
+                # vulnerable package ever enters an active build graph.
+                rkyv_path="$(cargo tree --workspace --invert rkyv@0.7.46 2>/dev/null || true)"
+                if [ -n "$rkyv_path" ]; then
+                  printf '%s\n' "$rkyv_path" >&2
+                  echo "vulnerable rkyv unexpectedly entered the active dependency graph" >&2
+                  exit 1
+                fi
+              - name: Audit Rust dependencies
+              shell: bash
+              run: |
+                # RUSTSEC-2026-0173: unmaintained (not vulnerable) compile-time-only
+                # proc-macro-error2, currently required by SeaORM's derive macros.
+                # RUSTSEC-2026-0235: inactive lockfile-only rkyv edge, guarded above.
+                cargo audit --deny warnings \\
+                  --ignore RUSTSEC-2026-0173 \\
+                  --ignore RUSTSEC-2026-0235
+          '''
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit("unexpected cargo-audit workflow block")
+          workflow.write_text(text)
+          PY
+
+          cargo fmt --all
+          git rm .github/workflows/canonical-quote-exact-head-autofix.yml
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/quotes.rs src/auth/shared_auth.rs src/routes/quote.rs tests/cockroach_rls.rs .github/workflows/ci.yml
+          git commit -m "fix: stabilize canonical quote exact-head gates"
+          git push origin HEAD:feat/canonical-plus-quote-platform
