@@ -102,7 +102,7 @@ jobs:
             USING (owner_id = auth.uid())
             WITH CHECK (owner_id = auth.uid());
           '''
-          schema_path.write_text(schema_sql.rstrip() + quote_schema + "\n")
+          schema_path.write_text(schema_sql.rstrip() + quote_schema.rstrip() + "\n")
 
           bootstrap_path = Path("deploy/postgres/bootstrap_runtime_role.sql")
           bootstrap_sql = bootstrap_path.read_text()
@@ -136,7 +136,7 @@ jobs:
         run: cargo fmt --all
 
       - name: Show vulnerable reverse dependency
-        run: cargo tree --locked -i rkyv
+        run: cargo tree --locked --target all -i rkyv
 
       - name: Verify patch
         run: |
