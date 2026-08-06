@@ -38,6 +38,7 @@ canonical-session = { path = "crates/canonical-session" }
 canonical-store = { path = "crates/canonical-store" }
 chrono = { version = "0.4.42", features = ["serde"] }
 futures-util = "0.3.32"
+hmac = "0.13.0"
 maud = { version = "0.27.0", features = ["axum"] }
 opentelemetry = "0.32"
 opentelemetry-http = "0.32"
