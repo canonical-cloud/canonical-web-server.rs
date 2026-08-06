@@ -661,6 +661,7 @@ dependencies = [
  "canonical-store",
  "chrono",
  "futures-util",
+ "hmac",
  "http-body-util",
  "maud",
  "opentelemetry",
