@@ -1,0 +1,172 @@
+name: Validate Canonical dependency correction
+
+on:
+  push:
+    branches:
+      - ci/canonical-pr41-diagnose
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-fix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      RELEASE_SHA: 459d18e8248de7802c82b280232977cdf7c517cb
+      SEA_ORM_SHA: fd3d3de8a37df4ff790ff1661bb572b9ec1350d0
+      BUILD_TARGET: x86_64-unknown-linux-gnu
+    steps:
+      - name: Check out immutable release SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          persist-credentials: false
+          show-progress: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: "1.95.0"
+          components: rustfmt,clippy
+          targets: ${{ env.BUILD_TARGET }}
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.8.2
+      - name: Assert immutable source head
+        run: test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+      - name: Apply dependency and architecture corrections
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet --filter=blob:none --no-checkout https://github.com/SeaQL/sea-orm.git /tmp/sea-orm
+          git -C /tmp/sea-orm checkout --quiet "$SEA_ORM_SHA"
+          test "$(git -C /tmp/sea-orm rev-parse HEAD)" = "$SEA_ORM_SHA"
+          mkdir -p vendor
+          cp -R /tmp/sea-orm/sea-orm-migration vendor/sea-orm-migration
+          rm -rf vendor/sea-orm-migration/.git
+          python3 <<'PY'
+          from pathlib import Path
+
+          manifest = Path("vendor/sea-orm-migration/Cargo.toml")
+          text = manifest.read_text()
+          old = '''sea-orm = { version = "~2.0.0", path = "../", features = [
+              "schema-sync",
+          ] }'''
+          new = '''# Canonical security patch: upstream 2.0.0 enables SeaORM's broad
+          # defaults through this internal edge. Keep only migration-required
+          # schema synchronization and explicitly forwarded runtime/types.
+          sea-orm = { version = "~2.0.0", default-features = false, features = [
+              "schema-sync",
+          ] }'''
+          if old not in text:
+              raise SystemExit("unexpected upstream sea-orm dependency declaration")
+          text = text.replace(old, new, 1)
+          old_cli = 'sea-orm-cli = { version = "~2.0.0", path = "../sea-orm-cli", default-features = false, optional = true }'
+          new_cli = 'sea-orm-cli = { version = "~2.0.0", default-features = false, optional = true }'
+          if old_cli not in text:
+              raise SystemExit("unexpected upstream sea-orm-cli dependency declaration")
+          manifest.write_text(text.replace(old_cli, new_cli, 1))
+
+          root = Path("Cargo.toml")
+          text = root.read_text()
+          if "[patch.crates-io]" in text:
+              raise SystemExit("root manifest already has a crates.io patch section")
+          root.write_text(
+              text.rstrip()
+              + "\n\n# Remove SeaORM migration's unintended default type/archive graph.\n"
+              + "[patch.crates-io]\n"
+              + 'sea-orm-migration = { path = "vendor/sea-orm-migration" }\n'
+          )
+
+          test = Path("tests/modularization.rs")
+          text = test.read_text()
+          loop_anchor = '    for (marker, owner) in [\n'
+          owners = [
+              ('        ("Config::from_env", "src/command.rs"),\n', "Config::from_env", ["src/bin/canonical-api-server.rs", "src/command.rs"]),
+              ('        ("app::build_state", "src/server.rs"),\n', "app::build_state", ["src/api_server.rs", "src/server.rs"]),
+              ('        ("SocketAddr::from(([0, 0, 0, 0], port))", "src/server.rs"),\n', "SocketAddr::from(([0, 0, 0, 0], port))", ["src/api_server.rs", "src/server.rs"]),
+          ]
+          declarations = []
+          for owner_line, marker, paths in owners:
+              if text.count(owner_line) != 1:
+                  raise SystemExit(f"unexpected ownership contract for {marker}")
+              text = text.replace(owner_line, "", 1)
+              rendered = ", ".join(f'"{path}"' for path in paths)
+              declarations.extend([
+                  "    assert_exact_owners(",
+                  f'        "{marker}",',
+                  f"        &[{rendered}],",
+                  "    );",
+                  "",
+              ])
+          if text.count(loop_anchor) != 1:
+              raise SystemExit("unexpected single-owner loop")
+          test.write_text(text.replace(loop_anchor, "\n".join(declarations) + loop_anchor, 1))
+
+          workflow = Path(".github/workflows/ci.yml")
+          text = workflow.read_text()
+          start_marker = "      - name: Assert vulnerable rkyv is not in the resolved build graph\n"
+          audit_marker = "      - name: Audit Rust dependencies\n"
+          if start_marker not in text or audit_marker not in text:
+              raise SystemExit("existing rkyv audit contract was not found")
+          start = text.index(start_marker)
+          end = text.index(audit_marker, start)
+          guard = '''      - name: Assert vulnerable rkyv is not in the active Linux build graph
+              shell: bash
+              run: |
+                set -euo pipefail
+                # Cargo retains optional packages in Cargo.lock and metadata even
+                # when their feature is disabled. Fail if rkyv is reachable from
+                # any normal, build, or dev edge for the production Linux target.
+                active_path="$(cargo tree \
+                  --workspace \
+                  --locked \
+                  --target x86_64-unknown-linux-gnu \
+                  --invert rkyv@0.7.46 \
+                  --edges normal,build,dev \
+                  --prefix none 2>/dev/null || true)"
+                if [ -n "$active_path" ]; then
+                  printf '%s\n' "$active_path" >&2
+                  echo "vulnerable rkyv entered the active Linux dependency graph" >&2
+                  exit 1
+                fi
+                echo "rkyv 0.7.46 is absent from the active Linux dependency graph"
+          '''
+          guard = "\n".join(line[8:] if line.startswith("        ") else line for line in guard.splitlines()) + "\n"
+          text = text[:start] + guard + text[end:]
+          text = text.replace("# the resolved-graph assertion above.", "# the active Linux graph assertion above.", 1)
+          workflow.write_text(text)
+          PY
+          cargo update -p sea-orm-migration@2.0.0 --precise 2.0.0
+          cargo fmt --all
+          git diff --check
+      - name: Prove vulnerable archive code is inactive
+        shell: bash
+        run: |
+          set -euo pipefail
+          for package in rkyv@0.7.46 rust_decimal; do
+            active_path="$(cargo tree \
+              --workspace \
+              --locked \
+              --target "$BUILD_TARGET" \
+              --invert "$package" \
+              --edges normal,build,dev \
+              --prefix none 2>/dev/null || true)"
+            if [ -n "$active_path" ]; then
+              printf '%s\n' "$active_path" >&2
+              exit 1
+            fi
+          done
+          grep -Fq 'name = "rkyv"' Cargo.lock
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Check
+        run: cargo check --workspace --all-targets --locked --target "$BUILD_TARGET"
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked --target "$BUILD_TARGET" -- -D warnings
+      - name: Test
+        run: cargo test --workspace --all-targets --locked --target "$BUILD_TARGET"
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.2
+      - name: RustSec audit with guarded lockfile-only exception
+        run: >-
+          cargo audit --deny unmaintained --deny unsound --deny yanked
+          --ignore RUSTSEC-2026-0173 --ignore RUSTSEC-2026-0235
