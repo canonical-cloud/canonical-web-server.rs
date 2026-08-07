@@ -34,6 +34,8 @@ pub enum AppError {
     HttpClient(#[from] reqwest::Error),
     #[error("Supabase Auth client configuration failed")]
     AuthClient(#[from] canonical_auth::SupabaseAuthBuildError),
+    #[error("integration configuration failed")]
+    IntegrationConfig(#[from] crate::integrations::IntegrationConfigError),
     #[error("I/O error")]
     Io(#[from] std::io::Error),
     #[error("session cryptography failed")]
