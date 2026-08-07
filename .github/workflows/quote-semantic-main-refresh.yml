@@ -1,0 +1,91 @@
+name: Quote semantic main refresh
+
+on:
+  push:
+    branches:
+      - agent/quote-api-integration-v2
+
+permissions:
+  contents: write
+
+concurrency:
+  group: quote-semantic-main-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: ${{ !contains(github.event.head_commit.message, '[semantic-main-refresh]') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact quote cutover branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/quote-api-integration-v2
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Semantically reconcile the reviewed main head
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_main='d936385af4242463a42f6fe34dfe104ae6a3f560'
+          git fetch --no-tags origin main
+          actual_main="$(git rev-parse origin/main)"
+          test "$actual_main" = "$expected_main" || {
+            echo "main moved from reviewed head $expected_main to $actual_main" >&2
+            exit 1
+          }
+
+          set +e
+          git merge --no-commit --no-ff origin/main
+          merge_status=$?
+          set -e
+          test "$merge_status" -ne 0 || {
+            echo 'expected the reviewed README conflict, but merge completed without it' >&2
+            exit 1
+          }
+
+          unresolved="$(git diff --name-only --diff-filter=U)"
+          test "$unresolved" = 'README.md' || {
+            echo "unexpected unresolved paths:" >&2
+            printf '%s\n' "$unresolved" >&2
+            exit 1
+          }
+
+          git checkout --ours README.md
+          python3 <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          marker = "## Cross-surface delivery\n"
+          ours = Path("README.md").read_text()
+          main = subprocess.check_output(
+              ["git", "show", "origin/main:README.md"],
+              text=True,
+          )
+          if marker in ours:
+              raise SystemExit("quote branch already contains the cross-surface section")
+          if main.count(marker) != 1:
+              raise SystemExit(
+                  f"expected one cross-surface section on main, found {main.count(marker)}"
+              )
+          section = main[main.index(marker):].rstrip() + "\n"
+          Path("README.md").write_text(ours.rstrip() + "\n\n" + section)
+          PY
+
+          git add README.md .gitignore docs/CROSS_SURFACE_DELIVERY.md
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git diff --cached --check
+          grep -Fq 'CANONICAL_INTERNAL_AUTH_TOKEN' README.md
+          grep -Fq '## Cross-surface delivery' README.md
+          test -f docs/CROSS_SURFACE_DELIVERY.md
+
+      - name: Commit the semantic merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'merge: reconcile cross-surface docs into quote API cutover [semantic-main-refresh]'
+          git push origin HEAD:agent/quote-api-integration-v2
