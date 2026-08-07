@@ -29,6 +29,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
           expected_main='d936385af4242463a42f6fe34dfe104ae6a3f560'
           git fetch --no-tags origin main
           actual_main="$(git rev-parse origin/main)"
@@ -85,7 +88,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'merge: reconcile cross-surface docs into quote API cutover [semantic-main-refresh]'
           git push origin HEAD:agent/quote-api-integration-v2
