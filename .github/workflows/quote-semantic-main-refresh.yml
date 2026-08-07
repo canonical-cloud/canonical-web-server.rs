@@ -44,20 +44,17 @@ jobs:
           git merge --no-commit --no-ff origin/main
           merge_status=$?
           set -e
-          test "$merge_status" -ne 0 || {
-            echo 'expected the reviewed README conflict, but merge completed without it' >&2
-            exit 1
-          }
 
-          unresolved="$(git diff --name-only --diff-filter=U)"
-          test "$unresolved" = 'README.md' || {
-            echo "unexpected unresolved paths:" >&2
-            printf '%s\n' "$unresolved" >&2
-            exit 1
-          }
+          if test "$merge_status" -ne 0; then
+            unresolved="$(git diff --name-only --diff-filter=U)"
+            test "$unresolved" = 'README.md' || {
+              echo "unexpected unresolved paths:" >&2
+              printf '%s\n' "$unresolved" >&2
+              exit 1
+            }
 
-          git checkout --ours README.md
-          python3 <<'PY'
+            git checkout --ours README.md
+            python3 <<'PY'
           from pathlib import Path
           import subprocess
 
@@ -76,6 +73,7 @@ jobs:
           section = main[main.index(marker):].rstrip() + "\n"
           Path("README.md").write_text(ours.rstrip() + "\n\n" + section)
           PY
+          fi
 
           git add README.md .gitignore docs/CROSS_SURFACE_DELIVERY.md
           test -z "$(git diff --name-only --diff-filter=U)"
@@ -83,6 +81,7 @@ jobs:
           grep -Fq 'CANONICAL_INTERNAL_AUTH_TOKEN' README.md
           grep -Fq '## Cross-surface delivery' README.md
           test -f docs/CROSS_SURFACE_DELIVERY.md
+          test "$(git rev-parse -q --verify MERGE_HEAD)" = "$expected_main"
 
       - name: Commit the semantic merge
         shell: bash
