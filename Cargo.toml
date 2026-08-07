@@ -44,7 +44,7 @@ opentelemetry-http = "0.32"
 opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic", "metrics", "trace"] }
 opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"] }
 rand = "0.10.2"
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "stream"] }
 sea-orm = { workspace = true, features = ["macros", "runtime-tokio-rustls", "sqlx-postgres", "sqlx-sqlite", "with-chrono", "with-json", "with-uuid"] }
 sea-orm-migration = { workspace = true, features = ["runtime-tokio-rustls", "sqlx-postgres", "sqlx-sqlite", "with-chrono", "with-json", "with-uuid"] }
 serde = { version = "1.0.228", features = ["derive"] }

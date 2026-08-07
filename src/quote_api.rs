@@ -3,9 +3,11 @@
 use std::{env, sync::Arc, time::Duration};
 
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use futures_util::StreamExt;
 use maud::{html, Markup, DOCTYPE};
 use reqwest::{Client, Response, Url};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::{auth::AuthContext, error::AppError};
@@ -16,7 +18,7 @@ const MAX_RESPONSE_BYTES: usize = 512 * 1024;
 pub struct QuoteApiClient {
     base_url: String,
     http: Client,
-    service_token: Arc<str>,
+    internal_auth_token: Arc<str>,
 }
 
 impl QuoteApiClient {
@@ -25,7 +27,7 @@ impl QuoteApiClient {
             .map_err(|_| AppError::BadRequest("CANONICAL_API_URL is required".into()))?;
         let parsed = Url::parse(&raw_url)
             .map_err(|_| AppError::BadRequest("CANONICAL_API_URL must be absolute".into()))?;
-        let loopback = matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "::1"))
+        let internal_origin = matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "::1"))
             || parsed.host_str().is_some_and(|host| host.ends_with(".svc"))
             || parsed.host_str().is_some_and(|host| host.contains(".svc."));
         if parsed.host_str().is_none()
@@ -34,30 +36,34 @@ impl QuoteApiClient {
             || parsed.query().is_some()
             || parsed.fragment().is_some()
             || parsed.path() != "/"
-            || (parsed.scheme() != "https" && !(parsed.scheme() == "http" && loopback))
+            || (parsed.scheme() != "https" && !(parsed.scheme() == "http" && internal_origin))
         {
             return Err(AppError::BadRequest(
                 "CANONICAL_API_URL must be an HTTPS origin, except for loopback or Kubernetes service DNS"
                     .into(),
             ));
         }
-        let service_token = env::var("CANONICAL_WEB_SERVICE_TOKEN")
-            .map_err(|_| AppError::BadRequest("CANONICAL_WEB_SERVICE_TOKEN is required".into()))?;
-        if service_token.len() < 32 || service_token.trim() != service_token {
+
+        let internal_auth_token = env::var("CANONICAL_INTERNAL_AUTH_TOKEN").map_err(|_| {
+            AppError::BadRequest("CANONICAL_INTERNAL_AUTH_TOKEN is required".into())
+        })?;
+        if internal_auth_token.trim() != internal_auth_token || internal_auth_token.len() < 32 {
             return Err(AppError::BadRequest(
-                "CANONICAL_WEB_SERVICE_TOKEN must contain at least 32 bytes".into(),
+                "CANONICAL_INTERNAL_AUTH_TOKEN must contain at least 32 bytes".into(),
             ));
         }
+
         let http = Client::builder()
             .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(20))
             .redirect(reqwest::redirect::Policy::none())
             .user_agent("canonical-web-server/0.1")
             .build()?;
+
         Ok(Self {
             base_url: parsed.origin().ascii_serialization(),
             http,
-            service_token: Arc::from(service_token),
+            internal_auth_token: Arc::from(internal_auth_token),
         })
     }
 
@@ -66,14 +72,24 @@ impl QuoteApiClient {
         actor: &AuthContext,
         request: &QuoteRequest,
     ) -> Result<QuoteResponse, AppError> {
+        let payload = ApiCreateQuoteRequest {
+            frameworks: &request.frameworks,
+            notes: request.analysis_notes(),
+            organization: ApiOrganization {
+                employee_count: request.employee_count,
+                industry: &request.industry,
+                legal_name: &request.company_name,
+            },
+        };
         let response = self
             .http
             .post(format!("{}/v1/quotes", self.base_url))
             .headers(self.headers(actor)?)
-            .json(request)
+            .json(&payload)
             .send()
             .await?;
-        decode(response, Some(StatusCode::ACCEPTED)).await
+        let record: ApiQuoteRecord = decode(response, StatusCode::ACCEPTED).await?;
+        Ok(record.into())
     }
 
     pub async fn get(
@@ -87,7 +103,8 @@ impl QuoteApiClient {
             .headers(self.headers(actor)?)
             .send()
             .await?;
-        decode(response, Some(StatusCode::OK)).await
+        let record: ApiQuoteRecord = decode(response, StatusCode::OK).await?;
+        Ok(record.into())
     }
 
     pub async fn list(&self, actor: &AuthContext) -> Result<Vec<QuoteResponse>, AppError> {
@@ -97,32 +114,27 @@ impl QuoteApiClient {
             .headers(self.headers(actor)?)
             .send()
             .await?;
-        decode(response, Some(StatusCode::OK)).await
+        let records: Vec<ApiQuoteRecord> = decode(response, StatusCode::OK).await?;
+        Ok(records.into_iter().map(QuoteResponse::from).collect())
     }
 
     fn headers(&self, actor: &AuthContext) -> Result<HeaderMap, AppError> {
         let mut headers = HeaderMap::new();
         headers.insert(
-            "x-canonical-service-token",
-            HeaderValue::from_str(&self.service_token).map_err(|_| AppError::Crypto)?,
+            "x-canonical-internal-token",
+            HeaderValue::from_str(&self.internal_auth_token).map_err(|_| AppError::Crypto)?,
         );
         headers.insert(
-            "x-canonical-user-id",
+            "x-canonical-subject",
             HeaderValue::from_str(&actor.user_id.to_string()).map_err(|_| AppError::Crypto)?,
         );
-        if !actor.email.is_empty() {
-            headers.insert(
-                "x-canonical-user-email",
-                HeaderValue::from_str(&actor.email).map_err(|_| AppError::Crypto)?,
-            );
-        }
         Ok(headers)
     }
 }
 
 async fn decode<T: DeserializeOwned>(
     response: Response,
-    expected: Option<StatusCode>,
+    expected: StatusCode,
 ) -> Result<T, AppError> {
     let status = response.status();
     if status == StatusCode::NOT_FOUND {
@@ -136,19 +148,24 @@ async fn decode<T: DeserializeOwned>(
             "review the quote fields and try again".into(),
         ));
     }
-    if expected.is_some_and(|expected| status != expected) || !status.is_success() {
+    if status != expected || !status.is_success() {
         tracing::warn!(%status, "dedicated quote API rejected the request");
         return Err(AppError::ServiceUpstream);
     }
-    let bytes = response.bytes().await?;
-    if bytes.len() > MAX_RESPONSE_BYTES {
-        return Err(AppError::ServiceUpstream);
+
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+            return Err(AppError::ServiceUpstream);
+        }
+        bytes.extend_from_slice(&chunk);
     }
     serde_json::from_slice(&bytes).map_err(AppError::from)
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug)]
 pub struct QuoteRequest {
     pub company_name: String,
     pub industry: String,
@@ -164,19 +181,102 @@ pub struct QuoteRequest {
     pub notes: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+impl QuoteRequest {
+    fn analysis_notes(&self) -> Option<String> {
+        let mut lines = vec![
+            format!(
+                "Security program maturity: {}",
+                self.security_program_maturity
+            ),
+            format!("Requested timeline: {}", self.target_timeline),
+            format!("Handles protected health information: {}", self.handles_phi),
+            format!("Handles payment-card data: {}", self.handles_payment_cards),
+        ];
+        if let Some(revenue) = self.annual_revenue_usd {
+            lines.push(format!("Annual revenue USD: {revenue}"));
+        }
+        if !self.cloud_providers.is_empty() {
+            lines.push(format!(
+                "Cloud providers: {}",
+                self.cloud_providers.join(", ")
+            ));
+        }
+        if !self.existing_certifications.is_empty() {
+            lines.push(format!(
+                "Existing certifications: {}",
+                self.existing_certifications.join(", ")
+            ));
+        }
+        if let Some(notes) = self.notes.as_deref() {
+            lines.push(format!("Additional customer notes:\n{notes}"));
+        }
+        Some(lines.join("\n"))
+    }
+}
+
+#[derive(Serialize)]
+struct ApiCreateQuoteRequest<'a> {
+    frameworks: &'a [String],
+    notes: Option<String>,
+    organization: ApiOrganization<'a>,
+}
+
+#[derive(Serialize)]
+struct ApiOrganization<'a> {
+    employee_count: u32,
+    industry: &'a str,
+    legal_name: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiQuoteRecord {
+    analysis: Option<JsonValue>,
+    error_code: Option<String>,
+    frameworks: Vec<String>,
+    organization_name: String,
+    quote_id: Uuid,
+    status: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct QuoteResponse {
     pub id: Uuid,
     pub status: String,
     pub company_name: String,
     pub frameworks: Vec<String>,
     pub estimate: Option<QuoteEstimate>,
-    pub analysis_markdown: Option<String>,
+    pub analysis_summary: Option<String>,
+    pub error_code: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+impl From<ApiQuoteRecord> for QuoteResponse {
+    fn from(record: ApiQuoteRecord) -> Self {
+        let estimate = record.analysis.as_ref().and_then(|analysis| {
+            Some(QuoteEstimate {
+                low: analysis.get("estimated_total_fee_low")?.as_u64()?,
+                high: analysis.get("estimated_total_fee_high")?.as_u64()?,
+                currency: analysis.get("currency")?.as_str()?.to_owned(),
+            })
+        });
+        let analysis_summary = record
+            .analysis
+            .as_ref()
+            .and_then(|analysis| analysis.get("summary"))
+            .and_then(JsonValue::as_str)
+            .map(str::to_owned);
+        Self {
+            id: record.quote_id,
+            status: record.status,
+            company_name: record.organization_name,
+            frameworks: record.frameworks,
+            estimate,
+            analysis_summary,
+            error_code: record.error_code,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct QuoteEstimate {
     pub low: u64,
     pub high: u64,
@@ -226,6 +326,7 @@ pub fn quote_page(actor: &AuthContext, quotes: &[QuoteResponse]) -> Markup {
                             label { input type="checkbox" name="iso_27001"; "ISO 27001" }
                             label { input type="checkbox" name="pci_dss"; "PCI DSS" }
                             label { input type="checkbox" name="fedramp"; "FedRAMP" }
+                            label { input type="checkbox" name="gdpr"; "GDPR" }
                         }
 
                         h2 { "Scope" }
@@ -308,18 +409,17 @@ pub fn quote_status_fragment(quote: &QuoteResponse) -> Markup {
             }
         };
     }
-    if quote.status == "ready" {
-        let estimate = quote.estimate.as_ref();
+    if quote.status == "completed" {
         return html! {
             article id={ "quote-" (quote.id) } class="card" {
                 h2 { (quote.company_name) }
-                @if let Some(estimate) = estimate {
+                @if let Some(estimate) = quote.estimate.as_ref() {
                     p class="quote-total" {
                         "$" (estimate.low) "–$" (estimate.high) " " (&estimate.currency)
                     }
                 }
-                pre style="white-space:pre-wrap;font:inherit" {
-                    (quote.analysis_markdown.as_deref().unwrap_or("Your preliminary quote is ready."))
+                p {
+                    (quote.analysis_summary.as_deref().unwrap_or("Your preliminary quote is ready."))
                 }
                 p class="muted" {
                     "This is a preliminary estimate, not an audit opinion or certification."
@@ -333,6 +433,9 @@ pub fn quote_status_fragment(quote: &QuoteResponse) -> Markup {
             p class="error" role="alert" {
                 "We could not finish this quote. Please review your answers and try again."
             }
+            @if let Some(code) = quote.error_code.as_deref() {
+                p class="muted" { "Reference: " (code) }
+            }
         }
     }
 }
@@ -342,21 +445,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn response_contract_uses_camel_case() {
+    fn browser_payload_cannot_select_a_database_context() {
+        let frameworks = vec!["soc2".to_owned()];
+        let payload = ApiCreateQuoteRequest {
+            frameworks: &frameworks,
+            notes: None,
+            organization: ApiOrganization {
+                employee_count: 10,
+                industry: "Software",
+                legal_name: "Example",
+            },
+        };
+        let value = serde_json::to_value(payload).unwrap();
+        assert!(value.get("context_record_id").is_none());
+        assert!(value.get("markdown_context").is_none());
+    }
+
+    #[test]
+    fn maps_the_durable_api_record() {
         let value = serde_json::json!({
-            "id": Uuid::nil(),
-            "status": "queued",
-            "companyName": "Example",
+            "analysis": {
+                "summary": "A phased readiness engagement.",
+                "currency": "USD",
+                "estimated_total_fee_low": 12000,
+                "estimated_total_fee_high": 18000
+            },
+            "context_record_id": Uuid::nil(),
+            "error_code": null,
             "frameworks": ["soc2"],
-            "createdAt": "2026-08-06T00:00:00Z",
-            "updatedAt": "2026-08-06T00:00:00Z",
-            "completedAt": null,
-            "estimate": null,
-            "analysisMarkdown": null,
-            "failureMessage": null
+            "gemini_model": "gemini-3.1-pro-preview",
+            "organization_name": "Example",
+            "persistence": "postgres",
+            "quote_id": Uuid::nil(),
+            "status": "completed"
         });
-        let quote: QuoteResponse = serde_json::from_value(value).unwrap();
+        let record: ApiQuoteRecord = serde_json::from_value(value).unwrap();
+        let quote = QuoteResponse::from(record);
         assert_eq!(quote.company_name, "Example");
-        assert_eq!(quote.frameworks, ["soc2"]);
+        assert_eq!(quote.estimate.as_ref().unwrap().low, 12_000);
+        assert_eq!(
+            quote.analysis_summary.as_deref(),
+            Some("A phased readiness engagement.")
+        );
     }
 }

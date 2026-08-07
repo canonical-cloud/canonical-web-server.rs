@@ -42,8 +42,10 @@ credentials or the server's Supabase token pair.
 - `src/routes/` — probes, Maud/HTMX pages, versioned REST, and authenticated
   WebSocket upgrade handling.
 - `src/quote_api.rs` — bounded client and Maud views for the separately deployed
-  `canonical-api-server.rs`; it sends a verified user id under a dedicated
-  service credential and never exposes Gemini or database credentials.
+  `canonical-api-server.rs`; it sends the Shared Auth subject under
+  `x-canonical-subject`, authenticates with `CANONICAL_INTERNAL_AUTH_TOKEN`,
+  and never exposes or selects the owner-scoped database context, Gemini, or
+  database credentials.
 - `src/sync/` — compare-and-swap mutations, durable idempotency, tombstones,
   owner-bound encrypted cursors, and pull pagination.
 - `src/ws/` — owner-scoped in-process fanout plus a bounded PostgreSQL
@@ -80,6 +82,12 @@ new kind only with matching validation, authorization, schema, and merge rules.
 `/api/health` and `/api/info` remain compatibility aliases. Unknown API and
 application paths have JSON and HTML 404s respectively rather than falling
 through to the marketing SPA.
+
+The `/u/quote` handlers verify the host-only Shared Auth session at the origin,
+then call the dedicated API over its private Kubernetes origin. Browser input
+cannot choose the internal service token, authenticated subject, Canonical
+context record, application Markdown, Gemini key, or Gemini model. The API
+selects the authenticated owner's single active context row.
 
 ## Multi-instance invalidations
 

@@ -84,7 +84,11 @@ pub async fn build_state(config: Config) -> Result<AppState, AppError> {
     #[cfg(feature = "test-auth")]
     if auth::test_provider::BrowserTestAuth::is_enabled() {
         tracing::warn!("browser-e2e test authentication provider enabled");
-        return AppState::new(config, db, Arc::new(auth::test_provider::BrowserTestAuth));
+        let mut state = AppState::new(config, db, Arc::new(auth::test_provider::BrowserTestAuth))?;
+        state.quote_api = crate::quote_api::QuoteApiClient::from_env()
+            .ok()
+            .map(Arc::new);
+        return Ok(state);
     }
 
     let auth = Arc::new(auth::SupabaseAuth::new(
