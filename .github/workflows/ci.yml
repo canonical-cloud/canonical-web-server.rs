@@ -94,9 +94,10 @@ jobs:
           # package is absent under SQLx 0.9, but keep a fail-closed graph check
           # in case a future lockfile brings it back.
           if grep -q '^name = "rsa"$' Cargo.lock; then
-            rsa_path="$(cargo tree --workspace --invert rsa 2>/dev/null)"
+            rsa_path="$(cargo tree --workspace --target all --invert rsa 2>/dev/null)"
             if [ -n "$rsa_path" ]; then
-              echo "rsa unexpectedly entered the active dependency graph" >&2
+              echo "rsa unexpectedly entered an all-target dependency graph" >&2
+              printf '%s\n' "$rsa_path" >&2
               exit 1
             fi
           fi
