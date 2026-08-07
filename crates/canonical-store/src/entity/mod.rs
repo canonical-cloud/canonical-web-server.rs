@@ -1,5 +1,7 @@
 pub mod audit_engagement;
+pub mod canonical_context;
 pub mod engagement_note;
+pub mod quote_request;
 pub mod sync_change;
 pub mod sync_clock;
 pub mod sync_receipt;

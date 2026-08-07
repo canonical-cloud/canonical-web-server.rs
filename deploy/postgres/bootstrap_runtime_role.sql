@@ -165,7 +165,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   public.sync_change,
   public.sync_receipt,
   public.audit_engagement,
-  public.engagement_note
+  public.engagement_note,
+  public.quote_request
 TO canonical_web_server;
 
 

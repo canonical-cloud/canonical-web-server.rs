@@ -19,7 +19,7 @@ use crate::{
     config::Config,
     database,
     error::AppError,
-    metrics, routes, telemetry, ws,
+    metrics, quotes, routes, telemetry, ws,
 };
 
 #[derive(Clone)]
@@ -96,6 +96,8 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub db: sea_orm::DatabaseConnection,
     pub auth: Arc<dyn AuthProvider>,
+    pub edge_auth: auth::EdgeAuthVerifier,
+    pub quotes: quotes::QuoteService,
     pub login_rate_limiter: auth::LoginRateLimiter,
     pub(crate) login_auth_semaphore: Arc<Semaphore>,
     pub sessions: auth::SessionService,
@@ -120,6 +122,8 @@ impl AppState {
             &config.session_encryption_key,
             config.session_ttl,
         )?;
+        let edge_auth = auth::EdgeAuthVerifier::from_env()?;
+        let quotes = quotes::QuoteService::from_env(db.clone())?;
         let login_rate_limiter = auth::LoginRateLimiter::new(
             config.login_rate_limit_attempts,
             config.login_rate_limit_global_attempts,
@@ -133,6 +137,8 @@ impl AppState {
             config,
             db,
             auth,
+            edge_auth,
+            quotes,
             login_rate_limiter,
             login_auth_semaphore,
             sessions,
@@ -185,7 +191,11 @@ fn decorate_http(app: Router) -> Router {
         telemetry::instrument_http(app).layer(axum::middleware::from_fn(metrics::record_http));
 
     app.layer((
-        SetSensitiveRequestHeadersLayer::new([header::AUTHORIZATION, header::COOKIE]),
+        SetSensitiveRequestHeadersLayer::new([
+            header::AUTHORIZATION,
+            header::COOKIE,
+            edge_secret_header,
+        ]),
         SetRequestIdLayer::new(request_id_header.clone(), MakeRequestUuid),
         PropagateRequestIdLayer::new(request_id_header),
         SetResponseHeaderLayer::if_not_present(

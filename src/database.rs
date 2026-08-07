@@ -3,7 +3,10 @@
 use sea_orm::{ConnectionTrait, DatabaseBackend};
 use sea_orm_migration::MigratorTrait;
 
-use crate::{db::migration::Migrator, error::AppError};
+use crate::{
+    db::{migration::Migrator, quote_migration::QuoteMigrator},
+    error::AppError,
+};
 
 pub async fn connect(
     database_url: &str,

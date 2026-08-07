@@ -3,7 +3,7 @@ mod quotes;
 use crate::{
     auth::{require_csrf, require_origin, Authenticated, CredentialSource},
     error::AppError,
-    routes::health,
+    routes::{health, quote},
     sync::{self, MutationBatch, PullQuery},
     AppState,
 };
