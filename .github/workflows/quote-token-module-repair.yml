@@ -1,0 +1,87 @@
+name: Quote token module repair
+
+on:
+  push:
+    branches:
+      - agent/quote-api-integration-v2
+
+permissions:
+  contents: write
+
+concurrency:
+  group: quote-token-module-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: ${{ !contains(github.event.head_commit.message, '[token-module-repair]') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact cutover branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/quote-api-integration-v2
+          persist-credentials: true
+
+      - name: Move compatibility into the quote client boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          quote_api = Path('src/quote_api.rs')
+          text = quote_api.read_text()
+          old = '''        let internal_auth_token = env::var("CANONICAL_INTERNAL_AUTH_TOKEN").map_err(|_| {
+            AppError::BadRequest("CANONICAL_INTERNAL_AUTH_TOKEN is required".into())
+        })?;
+'''
+          new = '''        let internal_auth_token = env::var("CANONICAL_INTERNAL_AUTH_TOKEN")
+            .or_else(|error| match error {
+                env::VarError::NotPresent => env::var("CANONICAL_WEB_SERVICE_TOKEN"),
+                other => Err(other),
+            })
+            .map_err(|_| {
+                AppError::BadRequest("CANONICAL_INTERNAL_AUTH_TOKEN is required".into())
+            })?;
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one internal-token read block, found {text.count(old)}')
+          quote_api.write_text(text.replace(old, new))
+
+          Path('src/main.rs').write_text('''use canonical_web_server::{command, telemetry, SERVICE};
+use tracing::Instrument as _;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let _telemetry = telemetry::init(SERVICE, "canonical-cloud");
+    let service_span = tracing::info_span!(
+        "service.run",
+        service.name = SERVICE,
+        service.namespace = "canonical-cloud",
+    );
+    let command = std::env::args().nth(1);
+    command::run(command.as_deref())
+        .instrument(service_span)
+        .await
+}
+''')
+          PY
+
+          cargo fmt --all
+          git diff --check
+          test "$(grep -cv '^[[:space:]]*$' src/main.rs)" -le 24
+          grep -Fq 'CANONICAL_INTERNAL_AUTH_TOKEN' src/quote_api.rs
+          grep -Fq 'CANONICAL_WEB_SERVICE_TOKEN' src/quote_api.rs
+          ! grep -Fq 'CANONICAL_WEB_SERVICE_TOKEN' src/main.rs
+
+      - name: Commit the modular repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/main.rs src/quote_api.rs
+          git commit -m 'fix: keep quote token compatibility in its module [token-module-repair]'
+          git push origin HEAD:agent/quote-api-integration-v2
