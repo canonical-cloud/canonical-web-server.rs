@@ -46,6 +46,8 @@ credentials or the server's Supabase token pair.
   `x-canonical-subject`, authenticates with `CANONICAL_INTERNAL_AUTH_TOKEN`,
   and never exposes or selects the owner-scoped database context, Gemini, or
   database credentials.
+- `src/routes/` — probes, Maud/HTMX pages, signed-in quote workflow, versioned REST, and authenticated
+  WebSocket upgrade handling. `/u/quote` verifies the Cloudflare edge HMAC and uses a distinct, rotated service credential only for the internal quote API request.
 - `src/sync/` — compare-and-swap mutations, durable idempotency, tombstones,
   owner-bound encrypted cursors, and pull pagination.
 - `src/ws/` — owner-scoped in-process fanout plus a bounded PostgreSQL
@@ -73,6 +75,8 @@ new kind only with matching validation, authorization, schema, and merge rules.
 | `GET` | `/app` | Authenticated Maud application shell |
 | `GET`, `POST` | `/u/quote` | Shared-auth-protected compliance quote workflow |
 | `GET` | `/u/quote/{quote_id}` | Owner-scoped quote status/detail |
+| `GET`, `POST` | `/u/quote` | Edge-authenticated Maud/HTMX quote workflow |
+| `GET` | `/u/quote/{quote_id}` | Owner-scoped HTMX quote status fragment |
 | `GET` | `/app/fragments/session` | HTMX session fragment |
 | `GET` | `/api/v1/{health,info,me}` | Versioned REST metadata/current user |
 | `GET` | `/api/v1/sync/changes` | Incremental authoritative pull |
