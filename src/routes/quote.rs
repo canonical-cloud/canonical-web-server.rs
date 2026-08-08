@@ -128,6 +128,8 @@ pub struct QuoteForm {
     #[serde(default)]
     pci_dss: Option<String>,
     #[serde(default)]
+    gdpr: Option<String>,
+    #[serde(default)]
     handles_phi: Option<String>,
     #[serde(default)]
     handles_payment_cards: Option<String>,
@@ -165,12 +167,13 @@ impl QuoteForm {
         }
         let frameworks = [
             ("soc2", self.soc2),
-            ("nist_csf", self.nist_csf),
-            ("nist_800_53", self.nist_800_53),
+            ("nist-csf", self.nist_csf),
+            ("nist-800-53", self.nist_800_53),
             ("hipaa", self.hipaa),
-            ("iso_27001", self.iso_27001),
+            ("iso-27001", self.iso_27001),
             ("fedramp", self.fedramp),
-            ("pci_dss", self.pci_dss),
+            ("pci-dss", self.pci_dss),
+            ("gdpr", self.gdpr),
         ]
         .into_iter()
         .filter_map(|(name, selected)| selected.map(|_| name.to_owned()))
@@ -302,6 +305,7 @@ mod tests {
             iso_27001: None,
             fedramp: None,
             pci_dss: None,
+            gdpr: None,
             handles_phi: Some("on".into()),
             handles_payment_cards: None,
         };
