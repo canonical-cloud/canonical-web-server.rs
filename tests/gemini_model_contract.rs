@@ -1,17 +1,14 @@
-const QUOTE_SOURCE: &str = include_str!("../src/quotes.rs");
+const QUOTE_CLIENT_SOURCE: &str = include_str!("../src/quote_api.rs");
+const LIB_SOURCE: &str = include_str!("../src/lib.rs");
 
 #[test]
-fn default_quote_model_stays_on_operator_selected_pro_model() {
-    assert!(
-        QUOTE_SOURCE.contains("const DEFAULT_GEMINI_MODEL: &str = \"gemini-3.6-pro\";"),
-        "the default model must remain the operator-selected Gemini 3.6 Pro model; use GEMINI_MODEL for an explicit runtime override"
-    );
-    assert!(
-        !QUOTE_SOURCE.contains("gemini-3.1-pro-preview"),
-        "do not silently revert the operator-selected default model"
-    );
-    assert!(
-        QUOTE_SOURCE.contains("std::env::var(\"GEMINI_MODEL\")"),
-        "the runtime model override must remain available"
-    );
+fn browser_tier_delegates_quote_analysis_without_gemini_credentials() {
+    assert!(LIB_SOURCE.contains("pub mod quote_api;"));
+    assert!(!LIB_SOURCE.contains("pub mod quotes;"));
+    assert!(QUOTE_CLIENT_SOURCE.contains("CANONICAL_API_URL"));
+    assert!(QUOTE_CLIENT_SOURCE.contains("CANONICAL_INTERNAL_AUTH_TOKEN"));
+    assert!(!QUOTE_CLIENT_SOURCE.contains("CANONICAL_CONTEXT_RECORD_ID"));
+    assert!(QUOTE_CLIENT_SOURCE.contains("x-canonical-subject"));
+    assert!(!QUOTE_CLIENT_SOURCE.contains("GEMINI_API_KEY"));
+    assert!(!QUOTE_CLIENT_SOURCE.contains("generateContent"));
 }

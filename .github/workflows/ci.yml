@@ -362,6 +362,8 @@ jobs:
             --env DATABASE_MAX_CONNECTIONS=1 \
             --env SUPABASE_URL=http://127.0.0.1:54321 \
             --env SUPABASE_PUBLISHABLE_KEY=sb_publishable_ci_only \
+            --env CANONICAL_API_URL=http://127.0.0.1:18080 \
+            --env CANONICAL_WEB_SERVICE_TOKEN=ci-only-canonical-web-service-token-00000000000000000000000000000000 \
             canonical-web-server:ci
           test "$(docker inspect --format '{{.Config.User}}' canonical-web-server-ci)" = "65532:65532"
           for attempt in {1..30}; do

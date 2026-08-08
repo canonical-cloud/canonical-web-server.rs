@@ -31,6 +31,7 @@ pub struct AppState {
     pub(crate) login_auth_semaphore: Arc<Semaphore>,
     pub sessions: auth::SessionService,
     pub shared_auth: auth::SharedAuthVerifier,
+    pub(crate) quote_api: Option<Arc<crate::quote_api::QuoteApiClient>>,
     pub hub: ws::Hub,
     pub(crate) bearer_auth_semaphore: Arc<Semaphore>,
 }
@@ -66,6 +67,7 @@ impl AppState {
             login_auth_semaphore,
             sessions,
             shared_auth,
+            quote_api: None,
             hub: ws::Hub::new(256),
             bearer_auth_semaphore,
         })
@@ -82,14 +84,20 @@ pub async fn build_state(config: Config) -> Result<AppState, AppError> {
     #[cfg(feature = "test-auth")]
     if auth::test_provider::BrowserTestAuth::is_enabled() {
         tracing::warn!("browser-e2e test authentication provider enabled");
-        return AppState::new(config, db, Arc::new(auth::test_provider::BrowserTestAuth));
+        let mut state = AppState::new(config, db, Arc::new(auth::test_provider::BrowserTestAuth))?;
+        state.quote_api = crate::quote_api::QuoteApiClient::from_env()
+            .ok()
+            .map(Arc::new);
+        return Ok(state);
     }
 
     let auth = Arc::new(auth::SupabaseAuth::new(
         config.supabase_url.clone(),
         config.supabase_publishable_key.clone(),
     )?);
-    AppState::new(config, db, auth)
+    let mut state = AppState::new(config, db, auth)?;
+    state.quote_api = Some(Arc::new(crate::quote_api::QuoteApiClient::from_env()?));
+    Ok(state)
 }
 
 pub fn build_app(state: AppState) -> Router {

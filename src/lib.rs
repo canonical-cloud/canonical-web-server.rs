@@ -6,13 +6,10 @@ pub mod app;
 pub mod auth;
 pub mod command;
 pub mod database;
+pub mod env_compat;
 pub mod error;
 pub mod metrics;
-// The nested match in the WebSocket loop intentionally keeps transport
-// receipt/error handling separate from message-kind handling. Collapsing it
-// makes close/error and ping/pong lifecycle behavior harder to audit.
-#[allow(clippy::collapsible_match)]
-pub mod quotes;
+pub mod quote_api;
 pub mod routes;
 pub mod server;
 pub mod sync;
