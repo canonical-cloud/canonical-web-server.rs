@@ -238,7 +238,13 @@ impl QuoteForm {
 
         let current_stage = required_enum(
             self.current_stage,
-            &["exploring", "readiness", "remediation", "audit_ready", "renewal"],
+            &[
+                "exploring",
+                "readiness",
+                "remediation",
+                "audit_ready",
+                "renewal",
+            ],
             "current stage",
         )?;
 
@@ -346,11 +352,7 @@ fn required_enum(value: String, allowed: &[&str], label: &str) -> Result<String,
     }
 }
 
-fn optional_enum(
-    value: String,
-    allowed: &[&str],
-    label: &str,
-) -> Result<Option<String>, AppError> {
+fn optional_enum(value: String, allowed: &[&str], label: &str) -> Result<Option<String>, AppError> {
     let Some(value) = optional(value) else {
         return Ok(None);
     };
@@ -485,9 +487,7 @@ mod tests {
 
     #[test]
     fn form_maps_exactly_to_the_canonical_golden_request() {
-        let request = fixture_form()
-            .into_request("security@example.com")
-            .unwrap();
+        let request = fixture_form().into_request("security@example.com").unwrap();
         let expected: serde_json::Value =
             serde_json::from_str(include_str!("../../fixtures/quote/v1/request.json")).unwrap();
         assert_eq!(serde_json::to_value(request).unwrap(), expected);
@@ -495,9 +495,7 @@ mod tests {
 
     #[test]
     fn browser_form_cannot_select_a_database_context() {
-        let request = fixture_form()
-            .into_request("security@example.com")
-            .unwrap();
+        let request = fixture_form().into_request("security@example.com").unwrap();
         assert_eq!(request.context_key, "quote-analysis");
         let value = serde_json::to_value(request).unwrap();
         assert!(value.get("contextRecordId").is_none());
