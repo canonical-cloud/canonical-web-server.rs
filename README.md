@@ -42,8 +42,10 @@ credentials or the server's Supabase token pair.
 - `src/routes/` — probes, Maud/HTMX pages, versioned REST, and authenticated
   WebSocket upgrade handling.
 - `src/quote_api.rs` — bounded client and Maud views for the separately deployed
-  `canonical-api-server.rs`; it sends a verified user id under a dedicated
-  service credential and never exposes Gemini or database credentials.
+  `canonical-api-server.rs`; it sends the Shared Auth subject under
+  `x-canonical-subject`, authenticates with `CANONICAL_INTERNAL_AUTH_TOKEN`,
+  and never exposes or selects the owner-scoped database context, Gemini, or
+  database credentials.
 - `src/sync/` — compare-and-swap mutations, durable idempotency, tombstones,
   owner-bound encrypted cursors, and pull pagination.
 - `src/ws/` — owner-scoped in-process fanout plus a bounded PostgreSQL
@@ -80,6 +82,12 @@ new kind only with matching validation, authorization, schema, and merge rules.
 `/api/health` and `/api/info` remain compatibility aliases. Unknown API and
 application paths have JSON and HTML 404s respectively rather than falling
 through to the marketing SPA.
+
+The `/u/quote` handlers verify the host-only Shared Auth session at the origin,
+then call the dedicated API over its private Kubernetes origin. Browser input
+cannot choose the internal service token, authenticated subject, Canonical
+context record, application Markdown, Gemini key, or Gemini model. The API
+selects the authenticated owner's single active context row.
 
 ## Multi-instance invalidations
 
@@ -326,3 +334,57 @@ docker run --env-file .env.local -p 8081:8081 \
 docker run --env-file .env.revoker.local canonical-session-revoker check
 docker run --env-file .env.revoker.local canonical-session-revoker run
 ```
+
+## Cross-surface delivery
+
+User-visible, quote, intake, framework, context, evidence, authentication,
+notification, permission, navigation, or deep-link changes in this Rust web/BFF
+must be evaluated for:
+
+- `canonical-cloud/canonical-agent-flutter` on Android, iOS, Flutter Web/mobile
+  web, and Flutter desktop when that proposed client is activated;
+- `canonical-cloud/canonical-agent-desktop.rs`, the proposed Rust desktop/local
+  evidence agent; and
+- Canonical interfaces, generated clients, quote/intake/framework/context/
+  evidence schemas, route types, compliance fixtures, and conformance tests.
+
+This is judgment-based coordination. Public marketing, SEO, server-rendered
+quote presentation, and browser-only account administration may remain
+web-specific. Local filesystem inventories, evidence collection, policy checks,
+browser/device attestations, watched folders, secure upload queues,
+signing/update behavior, and offline collection may be native-specific. Quote
+and intake semantics, framework selection, context records, evidence status,
+authentication, permissions, errors, notifications, and navigation normally
+require coordinated changes or an explicit no-change rationale and parity
+follow-up.
+
+Mobile does not need privileged local-evidence collection merely for parity. A
+good design may keep collection in the signed desktop agent while mobile
+provides status, approval, notification, and deep-link workflows. The native
+repositories remain proposed allocation targets and must not be described as
+published until their remotes and builds are verified.
+
+Deep links are HTTPS-first:
+
+```text
+https://<verified-canonical-owned-host>/open/<route>?<bounded-query>
+```
+
+The exact host must be proven before publication. A custom-scheme fallback
+requires a reviewed ADR and must not be guessed. Web and future clients must
+share versioned route types and fixtures and support cold start,
+already-running delivery, authentication resume, replay/expiry rejection,
+browser fallback, and explicit confirmation before quote submission, evidence
+import/upload, connector changes, attestations, approvals, or destructive
+operations.
+
+Quote answers, compliance evidence, private documents, filesystem inventories,
+absolute local paths, browser/device attestations, credentials, Supabase
+sessions, service tokens, model prompts/context, personally identifiable
+information, bearer/refresh tokens, and signing material are prohibited in
+URLs. Use bounded identifiers or short-lived, single-use, audience-bound codes
+and validate route version, user/quote/framework/context/evidence identity,
+action, authorization, assurance level, limits, and user intent.
+
+See [`docs/CROSS_SURFACE_DELIVERY.md`](docs/CROSS_SURFACE_DELIVERY.md) and the
+[portfolio policy](https://github.com/ORESoftware/project-registry/blob/main/docs/cross-surface-delivery.md).
