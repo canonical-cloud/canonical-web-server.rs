@@ -81,12 +81,8 @@ impl QuoteApiClient {
             .json(request)
             .send()
             .await?;
-        let submission: ApiQuoteSubmissionResponse =
-            decode(response, StatusCode::ACCEPTED).await?;
-        let expected_stream = format!(
-            "/api/v1/quotes/{}/events",
-            submission.quote_id
-        );
+        let submission: ApiQuoteSubmissionResponse = decode(response, StatusCode::ACCEPTED).await?;
+        let expected_stream = format!("/api/v1/quotes/{}/events", submission.quote_id);
         if submission.status != "queued"
             || submission.stream_url != expected_stream
             || submission.created_at.is_empty()
@@ -238,10 +234,7 @@ pub struct QuoteResponse {
 }
 
 impl QuoteResponse {
-    fn from_submission(
-        request: &QuoteRequest,
-        submission: ApiQuoteSubmissionResponse,
-    ) -> Self {
+    fn from_submission(request: &QuoteRequest, submission: ApiQuoteSubmissionResponse) -> Self {
         Self {
             id: submission.quote_id,
             status: submission.status,
