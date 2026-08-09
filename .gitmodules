@@ -1,0 +1,3 @@
+[submodule "vendor/opto-sync-clients"]
+	path = vendor/opto-sync-clients
+	url = https://github.com/opto-sync/opto-sync-clients.git
