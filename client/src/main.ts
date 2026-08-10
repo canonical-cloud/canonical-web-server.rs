@@ -8,7 +8,9 @@ declare global {
     htmx: typeof htmx;
     canonicalQuoteWrites?: QuoteWriteQueue;
     canonicalSync?: CanonicalSyncClient;
-    bootstrapCanonicalSync: (options: CanonicalSyncClientOptions) => Promise<CanonicalSyncClient>;
+    bootstrapCanonicalSync: (
+      options: CanonicalSyncClientOptions,
+    ) => Promise<CanonicalSyncClient>;
   }
 }
 
@@ -46,7 +48,9 @@ async function clearQuoteWrites(): Promise<void> {
   // different application's store from the dashboard. Quote pages clear their
   // live queue here; the logout response's Clear-Site-Data header remains the
   // authoritative origin-wide cleanup for data left by an earlier page.
-  const key = document.querySelector<HTMLMetaElement>('meta[name="canonical-quote-account"]')?.content;
+  const key = document.querySelector<HTMLMetaElement>(
+    'meta[name="canonical-quote-account"]',
+  )?.content;
   if (key !== undefined && key.length > 0) {
     const { QuoteWriteQueue } = await import("./quote-optimistic");
     const queue = await QuoteWriteQueue.open(key);
@@ -55,10 +59,15 @@ async function clearQuoteWrites(): Promise<void> {
 }
 
 htmx.on("htmx:wsBeforeMessage", (event) => {
-  const message = (event as CustomEvent<HtmxWebSocketMessageDetail>).detail.message;
+  const message = (event as CustomEvent<HtmxWebSocketMessageDetail>).detail
+    .message;
   try {
     const payload: unknown = JSON.parse(message);
-    if (typeof payload !== "object" || payload === null || !("type" in payload)) {
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      !("type" in payload)
+    ) {
       return;
     }
     const type = (payload as { type?: unknown }).type;
@@ -86,10 +95,13 @@ htmx.on("htmx:wsClose", (event) => {
   }
 });
 
-const csrfToken = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content;
+const csrfToken = document.querySelector<HTMLMetaElement>(
+  'meta[name="csrf-token"]',
+)?.content;
 if (csrfToken !== undefined && csrfToken.length > 0) {
   htmx.on("htmx:configRequest", (event) => {
-    const detail = (event as CustomEvent<{ headers: Record<string, string> }>).detail;
+    const detail = (event as CustomEvent<{ headers: Record<string, string> }>)
+      .detail;
     detail.headers["x-csrf-token"] = csrfToken;
   });
 }
@@ -106,7 +118,9 @@ export async function bootstrapCanonicalSync(
 
 window.bootstrapCanonicalSync = bootstrapCanonicalSync;
 
-const accountKey = document.querySelector<HTMLMetaElement>('meta[name="canonical-account-key"]')?.content;
+const accountKey = document.querySelector<HTMLMetaElement>(
+  'meta[name="canonical-account-key"]',
+)?.content;
 if (accountKey !== undefined && accountKey.length > 0) {
   void bootstrapCanonicalSync({ accountKey }).then(wireDraftNoteUi);
 }
@@ -123,12 +137,15 @@ if (document.querySelector('form[data-opto-quote="true"]') !== null) {
       const status = document.querySelector<HTMLElement>("#quote-sync-status");
       if (status !== null) {
         status.dataset.state = "failed";
-        status.textContent = "Local optimistic writes are unavailable; reload before submitting.";
+        status.textContent =
+          "Local optimistic writes are unavailable; reload before submitting.";
       }
     });
 }
 
-const logoutForm = document.querySelector<HTMLFormElement>('form[action="/auth/logout"]');
+const logoutForm = document.querySelector<HTMLFormElement>(
+  'form[action="/auth/logout"]',
+);
 logoutForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   void (async () => {
@@ -144,9 +161,15 @@ logoutForm?.addEventListener("submit", (event) => {
 });
 
 function wireDraftNoteUi(client: CanonicalSyncClient): void {
-  const form = document.querySelector<HTMLFormElement>('form[data-sync-form="draft_note"]');
-  const list = document.querySelector<HTMLElement>('[data-sync-list="draft_note"]');
-  const conflictList = document.querySelector<HTMLElement>('[data-sync-conflicts="draft_note"]');
+  const form = document.querySelector<HTMLFormElement>(
+    'form[data-sync-form="draft_note"]',
+  );
+  const list = document.querySelector<HTMLElement>(
+    '[data-sync-list="draft_note"]',
+  );
+  const conflictList = document.querySelector<HTMLElement>(
+    '[data-sync-conflicts="draft_note"]',
+  );
   const status = document.querySelector<HTMLElement>("#sync-status");
   if (form === null || list === null) {
     return;
@@ -167,10 +190,10 @@ function wireDraftNoteUi(client: CanonicalSyncClient): void {
       metadata.textContent = note.failed
         ? "Sync failed; discard this local change or try again with a new edit"
         : note.conflicted
-        ? "Conflict needs review"
-        : note.pending
-          ? "Saved locally; sync pending"
-          : `Synced at version ${note.version ?? "new"}`;
+          ? "Conflict needs review"
+          : note.pending
+            ? "Saved locally; sync pending"
+            : `Synced at version ${note.version ?? "new"}`;
       const action = document.createElement("button");
       action.type = "button";
       if (note.failed) {
@@ -189,7 +212,13 @@ function wireDraftNoteUi(client: CanonicalSyncClient): void {
           void client.deleteDraftNote(note.id).catch(showError);
         });
       }
-      article.append(heading, body, metadata, document.createElement("br"), action);
+      article.append(
+        heading,
+        body,
+        metadata,
+        document.createElement("br"),
+        action,
+      );
       fragment.append(article);
     }
     list.replaceChildren(fragment);
@@ -203,7 +232,7 @@ function wireDraftNoteUi(client: CanonicalSyncClient): void {
         heading.textContent =
           conflict.local.action === "delete"
             ? "Delete conflicted"
-            : conflict.local.value?.title ?? "Edit conflicted";
+            : (conflict.local.value?.title ?? "Edit conflicted");
         const explanation = document.createElement("p");
         explanation.className = "error";
         explanation.textContent =
@@ -229,14 +258,19 @@ function wireDraftNoteUi(client: CanonicalSyncClient): void {
     }
     if (status !== null) {
       status.dataset.state = navigator.onLine ? "synced" : "offline";
-      status.textContent = navigator.onLine ? "Local cache and server sync active" : "Offline; edits stay queued locally";
+      status.textContent = navigator.onLine
+        ? "Local cache and server sync active"
+        : "Offline; edits stay queued locally";
     }
   };
 
   const showError = (error: unknown): void => {
     if (status !== null) {
       status.dataset.state = "offline";
-      status.textContent = error instanceof Error ? error.message : "The local change could not be saved";
+      status.textContent =
+        error instanceof Error
+          ? error.message
+          : "The local change could not be saved";
     }
   };
 

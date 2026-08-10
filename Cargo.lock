@@ -601,6 +601,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "canonical-interfaces"
+version = "0.1.0"
+source = "git+https://github.com/canonical-cloud/canonical-interfaces?rev=3415d6d97721b18ee6734659d73a95ff3d35a151#3415d6d97721b18ee6734659d73a95ff3d35a151"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "canonical-session"
 version = "0.1.0"
 dependencies = [
@@ -657,6 +666,7 @@ dependencies = [
  "base64 0.23.1",
  "canonical-auth",
  "canonical-config",
+ "canonical-interfaces",
  "canonical-session",
  "canonical-store",
  "chrono",
