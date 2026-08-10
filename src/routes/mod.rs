@@ -16,8 +16,6 @@ use axum::{
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 
-const APP_CONTENT_SECURITY_POLICY_PREFIX: &str =
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:";
 const MARKETING_CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'";
 
 pub fn router(state: AppState) -> Router {
@@ -26,13 +24,26 @@ pub fn router(state: AppState) -> Router {
         .fallback(ServeFile::new(state.config.static_dir.join("index.html")));
     let app_assets = ServeDir::new(&state.config.app_asset_dir);
     let content_security_policy =
-        application_content_security_policy(&state.config.allowed_origins);
+        application_content_security_policy(&state.config.allowed_origins, false);
+    let quote_content_security_policy =
+        application_content_security_policy(&state.config.allowed_origins, true);
+
+    // The quote form is the only browser surface that instantiates the Opto
+    // WebAssembly client. Keep the narrower WebAssembly CSP capability on
+    // that route rather than granting it to login, the main application, or
+    // API-only responses.
+    let quote_form = Router::new()
+        .route("/u/quote", get(quote::page).post(quote::submit))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CONTENT_SECURITY_POLICY,
+            quote_content_security_policy,
+        ));
 
     let private_application = Router::new()
         .route("/login", get(auth::login_page))
         .route("/ws", axum::routing::any(websocket::upgrade))
-        .route("/u/quote", get(quote::page).post(quote::submit))
         .route("/u/quote/{id}", get(quote::detail))
+        .merge(quote_form)
         .nest("/api", api::router())
         .nest("/auth", auth::router())
         .nest("/app", pages::router())
@@ -79,7 +90,7 @@ pub fn router(state: AppState) -> Router {
 /// origin/CSRF/session validation used by the combined web process.
 pub fn api_only_router(state: AppState) -> Router {
     let content_security_policy =
-        application_content_security_policy(&state.config.allowed_origins);
+        application_content_security_policy(&state.config.allowed_origins, false);
     let private_api = Router::new()
         .route("/ws", axum::routing::any(websocket::upgrade))
         .nest("/api", api::router())
@@ -105,6 +116,7 @@ async fn admin_not_found() -> Response {
 
 fn application_content_security_policy(
     allowed_origins: &std::collections::HashSet<String>,
+    allow_webassembly: bool,
 ) -> HeaderValue {
     let mut websocket_sources = allowed_origins
         .iter()
@@ -121,8 +133,13 @@ fn application_content_security_policy(
         })
         .collect::<Vec<_>>();
     websocket_sources.sort();
+    let webassembly_source = if allow_webassembly {
+        " 'wasm-unsafe-eval'"
+    } else {
+        ""
+    };
     HeaderValue::from_str(&format!(
-        "{APP_CONTENT_SECURITY_POLICY_PREFIX}; connect-src 'self' {}; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+        "default-src 'self'; script-src 'self'{webassembly_source}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' {}; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
         websocket_sources.join(" ")
     ))
     .expect("validated origins produce a valid CSP header")
@@ -139,7 +156,7 @@ mod tests {
             "https://app.example.com".to_owned(),
             "http://localhost:8081".to_owned(),
         ]);
-        let header = application_content_security_policy(&origins);
+        let header = application_content_security_policy(&origins, false);
         let policy = header.to_str().unwrap();
         let directives = policy
             .split(';')
@@ -159,5 +176,23 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["object-src 'none'"]
         );
+        assert!(directives.contains(&"script-src 'self'"));
+        assert!(!policy.contains("'wasm-unsafe-eval'"));
+        assert!(!policy.contains("'unsafe-eval'"));
+    }
+
+    #[test]
+    fn quote_csp_allows_only_the_narrow_webassembly_eval_capability() {
+        let origins = HashSet::from(["https://app.example.com".to_owned()]);
+        let header = application_content_security_policy(&origins, true);
+        let policy = header.to_str().unwrap();
+        let directives = policy
+            .split(';')
+            .map(str::trim)
+            .filter(|directive| !directive.is_empty())
+            .collect::<Vec<_>>();
+
+        assert!(directives.contains(&"script-src 'self' 'wasm-unsafe-eval'"));
+        assert!(!policy.contains("'unsafe-eval'"));
     }
 }

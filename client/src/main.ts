@@ -42,9 +42,11 @@ async function clearQuoteWrites(): Promise<void> {
     await window.canonicalQuoteWrites.clearLocalData();
     return;
   }
-  const key =
-    document.querySelector<HTMLMetaElement>('meta[name="canonical-quote-account"]')?.content ??
-    document.querySelector<HTMLMetaElement>('meta[name="canonical-account-key"]')?.content;
+  // Do not instantiate the WebAssembly-backed quote client merely to clear a
+  // different application's store from the dashboard. Quote pages clear their
+  // live queue here; the logout response's Clear-Site-Data header remains the
+  // authoritative origin-wide cleanup for data left by an earlier page.
+  const key = document.querySelector<HTMLMetaElement>('meta[name="canonical-quote-account"]')?.content;
   if (key !== undefined && key.length > 0) {
     const { QuoteWriteQueue } = await import("./quote-optimistic");
     const queue = await QuoteWriteQueue.open(key);
