@@ -89,6 +89,25 @@ cannot choose the internal service token, authenticated subject, Canonical
 context record, application Markdown, Gemini key, or Gemini model. The API
 selects the authenticated owner's single active context row.
 
+## Optimistic quote writes
+
+The quote form remains server-rendered Maud plus HTMX. Before HTMX posts an
+unsafe request, the browser adapter stores the bounded form fields in the
+account-scoped opto-sync IndexedDB queue and renders that local view. CSRF
+material is never persisted. A client-generated UUID is sent as
+`Idempotency-Key` by the Rust web-to-API client, so an offline retry or a lost
+response returns the same durable quote instead of launching a duplicate
+analysis. The browser never calls the quote API directly and never receives the
+internal service credential.
+
+`vendor/opto-sync-clients` is a recursively checked-out, commit-pinned git
+submodule because `@opto-sync/client` is not published to the npm registry. The
+client `prepare` step builds its TypeScript and inlined WebAssembly artifacts
+before typechecking, testing, or bundling. Clone and CI checkouts must therefore
+initialize submodules recursively. The opto-sync adapter and WASM engine are
+dynamic chunks loaded only by the quote page (or logout cleanup), so the normal
+HTMX application shell does not pay their transfer cost.
+
 ## Multi-instance invalidations
 
 Every committed sync mutation still wakes WebSockets attached to the current
