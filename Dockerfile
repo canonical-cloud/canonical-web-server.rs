@@ -36,14 +36,14 @@ COPY --from=client-build /build/client/dist ./client/dist
 RUN cargo build --locked --release -p canonical-web-server --bin canonical-web-server \
     && strip target/release/canonical-web-server
 
-FROM gcr.io/distroless/cc-debian12:nonroot@sha256:fccdbb0a547c14e23fcf4ce8ad62ca5d43b4faae8d22cd292f490fef9946c96e AS revoker
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:adcd20c7b4c988b73cbfbddb26d2eee574571e6d7c9ffea29b3821e0690efb77 AS revoker
 COPY --from=revoker-build --chown=65532:65532 \
     /build/canonical-web-server.rs/target/release/canonical-session-revoker \
     /usr/local/bin/canonical-session-revoker
 USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/canonical-session-revoker"]
 
-FROM gcr.io/distroless/cc-debian12:nonroot@sha256:fccdbb0a547c14e23fcf4ce8ad62ca5d43b4faae8d22cd292f490fef9946c96e AS api
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:adcd20c7b4c988b73cbfbddb26d2eee574571e6d7c9ffea29b3821e0690efb77 AS api
 COPY --from=api-build --chown=65532:65532 \
     /build/canonical-web-server.rs/target/release/canonical-api-server \
     /usr/local/bin/canonical-api-server
@@ -51,7 +51,7 @@ EXPOSE 8081
 USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/canonical-api-server"]
 
-FROM gcr.io/distroless/cc-debian12:nonroot@sha256:fccdbb0a547c14e23fcf4ce8ad62ca5d43b4faae8d22cd292f490fef9946c96e AS web
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:adcd20c7b4c988b73cbfbddb26d2eee574571e6d7c9ffea29b3821e0690efb77 AS web
 COPY --from=web-build --chown=65532:65532 \
     /build/canonical-web-server.rs/target/release/canonical-web-server \
     /usr/local/bin/canonical-web-server
