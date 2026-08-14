@@ -31,7 +31,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
       - name: Application repository release boundary
         run: node tests/release-boundary.mjs
       - name: client dependencies
@@ -95,9 +95,10 @@ jobs:
           # package is absent under SQLx 0.9, but keep a fail-closed graph check
           # in case a future lockfile brings it back.
           if grep -q '^name = "rsa"$' Cargo.lock; then
-            rsa_path="$(cargo tree --workspace --invert rsa 2>/dev/null)"
+            rsa_path="$(cargo tree --workspace --target all --invert rsa 2>/dev/null)"
             if [ -n "$rsa_path" ]; then
-              echo "rsa unexpectedly entered the active dependency graph" >&2
+              echo "rsa unexpectedly entered an all-target dependency graph" >&2
+              printf '%s\n' "$rsa_path" >&2
               exit 1
             fi
           fi
@@ -166,7 +167,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: "1.95.0"
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
         with:
           key: postgres-rls
       - name: PostgreSQL runtime-role and RLS integration test
@@ -203,7 +204,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: "1.95.0"
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
         with:
           key: declarative-schema
       # Commit-pinned like the actions above (supply-chain hardening).
@@ -263,7 +264,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: "1.95.0"
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
         with:
           key: cockroach-rls
       - name: Start single-node CockroachDB
@@ -307,7 +308,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # v2
         with:
           key: browser-e2e
       - name: Build server binary

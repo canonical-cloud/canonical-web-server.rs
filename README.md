@@ -39,8 +39,10 @@ credentials or the server's Supabase token pair.
   entry point; application modules do not construct pools themselves.
 - `src/telemetry.rs` — JSON stdout logs for Promtail/Loki plus explicit OTLP
   HTTP spans and low-cardinality metrics for the collector/Prometheus.
-- `src/routes/` — probes, Maud/HTMX pages, versioned REST, and authenticated
-  WebSocket upgrade handling.
+- `src/routes/` — probes, Maud/HTMX pages, the signed-in Quote v1 workflow,
+  versioned REST, and authenticated WebSocket upgrade handling. `/u/quote`
+  verifies the Cloudflare edge HMAC and uses a distinct, rotated service
+  credential only for the internal quote API request.
 - `src/quote_api.rs` — bounded client and Maud views for the separately deployed
   `canonical-api-server.rs`; it sends the Shared Auth subject under
   `x-canonical-subject`, authenticates with `CANONICAL_INTERNAL_AUTH_TOKEN`,
@@ -235,6 +237,12 @@ proves the SeaORM migrations converge with it on every change (the
 `declarative-schema` job). Against a live Supabase database, generate and
 review a migration instead of hand-writing DDL — connect via the direct
 connection or session pooler (5432), never the transaction pooler:
+
+The web/session schema deliberately has no quote or Canonical-context tables.
+Those records belong to the dedicated API data plane. Any legacy web-owned
+quote data needs an explicit export, retention, and decommission plan reviewed
+with that API owner; this migration source neither creates nor automatically
+drops it.
 
 ```sh
 dpm diff   --source deploy/postgres/schema.sql --target "$MIGRATION_DATABASE_URL"            --shadow "$SHADOW_DATABASE_URL"      # review the SQL

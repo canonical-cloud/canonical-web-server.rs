@@ -34,12 +34,16 @@ pub enum AppError {
     HttpClient(#[from] reqwest::Error),
     #[error("Supabase Auth client configuration failed")]
     AuthClient(#[from] canonical_auth::SupabaseAuthBuildError),
+    #[error("integration configuration failed")]
+    IntegrationConfig(#[from] crate::integrations::IntegrationConfigError),
     #[error("I/O error")]
     Io(#[from] std::io::Error),
     #[error("session cryptography failed")]
     Crypto,
     #[error("serialization failed")]
     Serialization(#[from] serde_json::Error),
+    #[error("invalid service configuration: {0}")]
+    Configuration(&'static str),
 }
 
 impl From<canonical_session::SessionError> for AppError {

@@ -1,0 +1,38 @@
+[package]
+org = "canonical-cloud"
+name = "canonical-web-server"
+version = "0.1.0"
+description = "Canonical authenticated Maud/Axum/HTMX application server"
+license = "MIT"
+keywords = ["web", "axum", "maud", "htmx", "seaorm", "websocket"]
+language = "rust"
+
+[package.repository]
+vcs = "git"
+url = "https://github.com/canonical-cloud/canonical-web-server.rs"
+
+[dependencies]
+"canonical-cloud/canonical-clients" = "^0.1.0"
+"canonical-cloud/canonical-lib" = "^0.1.0"
+
+[build]
+command = "cargo build --release --locked --workspace --bins"
+outputs = ["target/release/canonical-web-server", "target/release/canonical-session-revoker"]
+
+[bin]
+canonical-web-server = "target/release/canonical-web-server"
+canonical-session-revoker = "target/release/canonical-session-revoker"
+
+[publish]
+include_readme = true
+tag_format = "v{version}"
+exclude = [".env", ".env.*", ".direnv/**", ".vendor/.zed/**", ".zed/**", ".zed-pack/**", "target/**", "tmp/**", "**/*.log", ".DS_Store"]
+
+[install]
+adapter = "none"
+dir = ".vendor/.zed"
+
+[scripts]
+test = "cargo test --workspace --all-targets --locked"
+lint = "cargo clippy --workspace --all-targets --locked -- -D warnings"
+format = "cargo fmt --all -- --check"
