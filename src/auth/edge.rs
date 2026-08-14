@@ -87,9 +87,8 @@ impl FromRequestParts<AppState> for EdgeAuthenticated {
             .ok_or(AppError::Unauthorized)?;
         let provider = validated_header(&parts.headers, PROVIDER_HEADER, 128, true)?
             .ok_or(AppError::Unauthorized)?;
-        let provider_tenant =
-            validated_header(&parts.headers, PROVIDER_TENANT_HEADER, 255, true)?
-                .ok_or(AppError::Unauthorized)?;
+        let provider_tenant = validated_header(&parts.headers, PROVIDER_TENANT_HEADER, 255, true)?
+            .ok_or(AppError::Unauthorized)?;
         let email = validated_header(&parts.headers, EMAIL_HEADER, 320, false)?;
         let project = validated_header(&parts.headers, PROJECT_HEADER, 255, false)?;
         let roles = parse_roles(&parts.headers)?;
@@ -150,11 +149,15 @@ fn parse_roles(headers: &HeaderMap) -> Result<Vec<String>, AppError> {
         return Err(AppError::Unauthorized);
     }
     let mut roles = Vec::new();
-    for role in raw.split(',').map(str::trim).filter(|role| !role.is_empty()) {
+    for role in raw
+        .split(',')
+        .map(str::trim)
+        .filter(|role| !role.is_empty())
+    {
         if role.len() > 64
-            || role
-                .bytes()
-                .any(|byte| !(byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':' | b'.')))
+            || role.bytes().any(|byte| {
+                !(byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':' | b'.'))
+            })
         {
             return Err(AppError::Unauthorized);
         }
@@ -172,7 +175,9 @@ fn constant_time_equal(expected: &[u8; 32], actual: &[u8; 32]) -> bool {
     expected
         .iter()
         .zip(actual.iter())
-        .fold(0_u8, |difference, (left, right)| difference | (left ^ right))
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
         == 0
 }
 
@@ -191,7 +196,10 @@ mod tests {
     #[test]
     fn roles_are_bounded_and_use_a_safe_alphabet() {
         let mut headers = HeaderMap::new();
-        headers.insert(ROLES_HEADER, "customer,quote:read,quote.write".parse().unwrap());
+        headers.insert(
+            ROLES_HEADER,
+            "customer,quote:read,quote.write".parse().unwrap(),
+        );
         assert_eq!(
             parse_roles(&headers).unwrap(),
             vec!["customer", "quote:read", "quote.write"]

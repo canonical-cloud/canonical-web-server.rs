@@ -33,10 +33,7 @@ impl fmt::Debug for SharedAuthClient {
             .field("base_url", &self.base_url)
             .field("client_id", &self.client_id)
             .field("client_secret", &"[REDACTED]")
-            .field(
-                "expected_supabase_project",
-                &self.expected_supabase_project,
-            )
+            .field("expected_supabase_project", &self.expected_supabase_project)
             .field("callback_url", &self.callback_url)
             .finish()
     }
@@ -49,10 +46,8 @@ impl SharedAuthClient {
             &required("SHARED_AUTH_BASE_URL")?,
             false,
         )?;
-        let client_id = validated_identifier(
-            "SHARED_AUTH_CLIENT_ID",
-            required("SHARED_AUTH_CLIENT_ID")?,
-        )?;
+        let client_id =
+            validated_identifier("SHARED_AUTH_CLIENT_ID", required("SHARED_AUTH_CLIENT_ID")?)?;
         let client_secret = required("SHARED_AUTH_CLIENT_SECRET")?;
         if client_secret.len() < 32 || client_secret.trim() != client_secret {
             return Err(IntegrationConfigError::Invalid {
@@ -64,7 +59,10 @@ impl SharedAuthClient {
             "SHARED_AUTH_SUPABASE_PROJECT",
             required("SHARED_AUTH_SUPABASE_PROJECT")?,
         )?;
-        let callback_url = format!("{}/auth/shared/callback", app_base_url.trim_end_matches('/'));
+        let callback_url = format!(
+            "{}/auth/shared/callback",
+            app_base_url.trim_end_matches('/')
+        );
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(5))
@@ -197,11 +195,8 @@ impl fmt::Debug for QuoteApiClient {
 
 impl QuoteApiClient {
     pub fn from_env() -> Result<Self, IntegrationConfigError> {
-        let base_url = validated_origin(
-            "CANONICAL_API_URL",
-            &required("CANONICAL_API_URL")?,
-            true,
-        )?;
+        let base_url =
+            validated_origin("CANONICAL_API_URL", &required("CANONICAL_API_URL")?, true)?;
         let service_token = required("CANONICAL_WEB_SERVICE_TOKEN")?;
         if service_token.len() < 32 || service_token.trim() != service_token {
             return Err(IntegrationConfigError::Invalid {

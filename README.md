@@ -39,15 +39,15 @@ credentials or the server's Supabase token pair.
   entry point; application modules do not construct pools themselves.
 - `src/telemetry.rs` — JSON stdout logs for Promtail/Loki plus explicit OTLP
   HTTP spans and low-cardinality metrics for the collector/Prometheus.
-- `src/routes/` — probes, Maud/HTMX pages, versioned REST, and authenticated
-  WebSocket upgrade handling.
+- `src/routes/` — probes, Maud/HTMX pages, the signed-in Quote v1 workflow,
+  versioned REST, and authenticated WebSocket upgrade handling. `/u/quote`
+  verifies the Cloudflare edge HMAC and uses a distinct, rotated service
+  credential only for the internal quote API request.
 - `src/quote_api.rs` — bounded client and Maud views for the separately deployed
   `canonical-api-server.rs`; it sends the Shared Auth subject under
   `x-canonical-subject`, authenticates with `CANONICAL_INTERNAL_AUTH_TOKEN`,
   and never exposes or selects the owner-scoped database context, Gemini, or
   database credentials.
-- `src/routes/` — probes, Maud/HTMX pages, signed-in quote workflow, versioned REST, and authenticated
-  WebSocket upgrade handling. `/u/quote` verifies the Cloudflare edge HMAC and uses a distinct, rotated service credential only for the internal quote API request.
 - `src/sync/` — compare-and-swap mutations, durable idempotency, tombstones,
   owner-bound encrypted cursors, and pull pagination.
 - `src/ws/` — owner-scoped in-process fanout plus a bounded PostgreSQL
@@ -75,8 +75,6 @@ new kind only with matching validation, authorization, schema, and merge rules.
 | `GET` | `/app` | Authenticated Maud application shell |
 | `GET`, `POST` | `/u/quote` | Shared-auth-protected compliance quote workflow |
 | `GET` | `/u/quote/{quote_id}` | Owner-scoped quote status/detail |
-| `GET`, `POST` | `/u/quote` | Edge-authenticated Maud/HTMX quote workflow |
-| `GET` | `/u/quote/{quote_id}` | Owner-scoped HTMX quote status fragment |
 | `GET` | `/app/fragments/session` | HTMX session fragment |
 | `GET` | `/api/v1/{health,info,me}` | Versioned REST metadata/current user |
 | `GET` | `/api/v1/sync/changes` | Incremental authoritative pull |
@@ -92,6 +90,25 @@ then call the dedicated API over its private Kubernetes origin. Browser input
 cannot choose the internal service token, authenticated subject, Canonical
 context record, application Markdown, Gemini key, or Gemini model. The API
 selects the authenticated owner's single active context row.
+
+## Optimistic quote writes
+
+The quote form remains server-rendered Maud plus HTMX. Before HTMX posts an
+unsafe request, the browser adapter stores the bounded form fields in the
+account-scoped opto-sync IndexedDB queue and renders that local view. CSRF
+material is never persisted. A client-generated UUID is sent as
+`Idempotency-Key` by the Rust web-to-API client, so an offline retry or a lost
+response returns the same durable quote instead of launching a duplicate
+analysis. The browser never calls the quote API directly and never receives the
+internal service credential.
+
+`vendor/opto-sync-clients` is a recursively checked-out, commit-pinned git
+submodule because `@opto-sync/client` is not published to the npm registry. The
+client `prepare` step builds its TypeScript and inlined WebAssembly artifacts
+before typechecking, testing, or bundling. Clone and CI checkouts must therefore
+initialize submodules recursively. The opto-sync adapter and WASM engine are
+dynamic chunks loaded only by the quote page (or logout cleanup), so the normal
+HTMX application shell does not pay their transfer cost.
 
 ## Multi-instance invalidations
 

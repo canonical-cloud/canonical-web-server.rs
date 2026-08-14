@@ -1,6 +1,6 @@
 //! Application state and HTTP router assembly.
 
-use std::{env, sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use axum::{
     http::{header, HeaderName, HeaderValue},
@@ -19,85 +19,18 @@ use crate::{
     config::Config,
     database,
     error::AppError,
-    metrics, quotes, routes, telemetry, ws,
+    metrics, routes, telemetry, ws,
 };
-
-#[derive(Clone)]
-pub(crate) struct QuoteClient {
-    pub base_url: String,
-    pub http: reqwest::Client,
-    pub maximum_assertion_age_seconds: i64,
-    pub origin_assertion_secret: Vec<u8>,
-    pub web_service_token: String,
-}
-
-impl QuoteClient {
-    fn from_env() -> Result<Self, AppError> {
-        let raw_url = env::var("CANONICAL_API_URL")
-            .map_err(|_| AppError::Configuration("CANONICAL_API_URL is required"))?;
-        let parsed = reqwest::Url::parse(&raw_url)
-            .map_err(|_| AppError::Configuration("CANONICAL_API_URL must be an absolute URL"))?;
-        if !matches!(parsed.scheme(), "http" | "https")
-            || parsed.host_str().is_none()
-            || !parsed.username().is_empty()
-            || parsed.password().is_some()
-            || parsed.query().is_some()
-            || parsed.fragment().is_some()
-            || parsed.path() != "/"
-        {
-            return Err(AppError::Configuration(
-                "CANONICAL_API_URL must be an HTTP(S) origin without credentials or a path",
-            ));
-        }
-        let secret = env::var("ORIGIN_ASSERTION_SECRET")
-            .map_err(|_| AppError::Configuration("ORIGIN_ASSERTION_SECRET is required"))?
-            .into_bytes();
-        if secret.len() < 32 {
-            return Err(AppError::Configuration(
-                "ORIGIN_ASSERTION_SECRET must contain at least 32 bytes",
-            ));
-        }
-        let web_service_token = env::var("CANONICAL_WEB_SERVICE_TOKEN")
-            .map_err(|_| AppError::Configuration("CANONICAL_WEB_SERVICE_TOKEN is required"))?;
-        if web_service_token.len() < 32 || web_service_token.trim() != web_service_token {
-            return Err(AppError::Configuration(
-                "CANONICAL_WEB_SERVICE_TOKEN must contain at least 32 non-whitespace-trimmed bytes",
-            ));
-        }
-        let maximum_assertion_age_seconds = env::var("ORIGIN_ASSERTION_MAX_AGE_SECONDS")
-            .unwrap_or_else(|_| "30".to_owned())
-            .parse::<i64>()
-            .map_err(|_| {
-                AppError::Configuration("ORIGIN_ASSERTION_MAX_AGE_SECONDS must be an integer")
-            })?;
-        if !(5..=60).contains(&maximum_assertion_age_seconds) {
-            return Err(AppError::Configuration(
-                "ORIGIN_ASSERTION_MAX_AGE_SECONDS must be between 5 and 60",
-            ));
-        }
-        let http = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(240))
-            .redirect(reqwest::redirect::Policy::none())
-            .user_agent("canonical-web-server/0.1")
-            .build()?;
-        Ok(Self {
-            base_url: parsed.origin().ascii_serialization(),
-            http,
-            maximum_assertion_age_seconds,
-            origin_assertion_secret: secret,
-            web_service_token,
-        })
-    }
-}
 
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
     pub db: sea_orm::DatabaseConnection,
     pub auth: Arc<dyn AuthProvider>,
+    /// Optional Cloudflare-edge identity verifier. It remains disabled unless
+    /// its shared secret is configured and is retained separately from the
+    /// browser Shared Auth quote flow.
     pub edge_auth: auth::EdgeAuthVerifier,
-    pub quotes: quotes::QuoteService,
     pub login_rate_limiter: auth::LoginRateLimiter,
     pub(crate) login_auth_semaphore: Arc<Semaphore>,
     pub sessions: auth::SessionService,
@@ -105,7 +38,6 @@ pub struct AppState {
     pub(crate) quote_api: Option<Arc<crate::quote_api::QuoteApiClient>>,
     pub hub: ws::Hub,
     pub(crate) bearer_auth_semaphore: Arc<Semaphore>,
-    pub(crate) quote: Option<Arc<QuoteClient>>,
 }
 
 impl AppState {
@@ -123,7 +55,6 @@ impl AppState {
             config.session_ttl,
         )?;
         let edge_auth = auth::EdgeAuthVerifier::from_env()?;
-        let quotes = quotes::QuoteService::from_env(db.clone())?;
         let login_rate_limiter = auth::LoginRateLimiter::new(
             config.login_rate_limit_attempts,
             config.login_rate_limit_global_attempts,
@@ -138,7 +69,6 @@ impl AppState {
             db,
             auth,
             edge_auth,
-            quotes,
             login_rate_limiter,
             login_auth_semaphore,
             sessions,
@@ -146,7 +76,6 @@ impl AppState {
             quote_api: None,
             hub: ws::Hub::new(256),
             bearer_auth_semaphore,
-            quote: None,
         })
     }
 }
@@ -187,6 +116,10 @@ pub fn build_api_app(state: AppState) -> Router {
 
 fn decorate_http(app: Router) -> Router {
     let request_id_header = HeaderName::from_static("x-request-id");
+    // The Cloudflare edge credential is only used by the optional edge
+    // identity extractor. Never allow request logging or diagnostics to emit
+    // it when that boundary is enabled.
+    let edge_secret_header = HeaderName::from_static("x-auth-edge-secret");
     let app =
         telemetry::instrument_http(app).layer(axum::middleware::from_fn(metrics::record_http));
 

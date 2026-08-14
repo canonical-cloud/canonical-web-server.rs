@@ -395,7 +395,10 @@ pub fn quote_result(quote: &Value) -> Markup {
 
     if status == "ready" {
         let estimate = quote.get("estimate").unwrap_or(&Value::Null);
-        let low = estimate.get("low").and_then(Value::as_u64).unwrap_or_default();
+        let low = estimate
+            .get("low")
+            .and_then(Value::as_u64)
+            .unwrap_or_default();
         let high = estimate
             .get("high")
             .and_then(Value::as_u64)

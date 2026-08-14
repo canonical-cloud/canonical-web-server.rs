@@ -13,6 +13,8 @@ use uuid::Uuid;
 use crate::{auth::AuthContext, error::AppError};
 
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
+const CANONICAL_CONTEXT_KEY: &str = "quote-analysis";
+const ANSWERS_VERSION: u8 = 1;
 
 #[derive(Clone)]
 pub struct QuoteApiClient {
@@ -71,25 +73,29 @@ impl QuoteApiClient {
         &self,
         actor: &AuthContext,
         request: &QuoteRequest,
+        idempotency_key: Uuid,
     ) -> Result<QuoteResponse, AppError> {
-        let payload = ApiCreateQuoteRequest {
-            frameworks: &request.frameworks,
-            notes: request.analysis_notes(),
-            organization: ApiOrganization {
-                employee_count: request.employee_count,
-                industry: &request.industry,
-                legal_name: &request.company_name,
-            },
-        };
+        let mut headers = self.headers(actor)?;
+        headers.insert(
+            "idempotency-key",
+            HeaderValue::from_str(&idempotency_key.to_string()).map_err(|_| AppError::Crypto)?,
+        );
         let response = self
             .http
-            .post(format!("{}/v1/quotes", self.base_url))
-            .headers(self.headers(actor)?)
-            .json(&payload)
+            .post(format!("{}/api/v1/quotes", self.base_url))
+            .headers(headers)
+            .json(request)
             .send()
             .await?;
-        let record: ApiQuoteRecord = decode(response, StatusCode::ACCEPTED).await?;
-        Ok(record.into())
+        let submission: ApiQuoteSubmissionResponse = decode(response, StatusCode::ACCEPTED).await?;
+        let expected_stream = format!("/api/v1/quotes/{}/events", submission.quote_id);
+        if submission.status != "queued"
+            || submission.stream_url != expected_stream
+            || submission.created_at.is_empty()
+        {
+            return Err(AppError::ServiceUpstream);
+        }
+        Ok(QuoteResponse::from_submission(request, submission))
     }
 
     pub async fn get(
@@ -99,7 +105,7 @@ impl QuoteApiClient {
     ) -> Result<QuoteResponse, AppError> {
         let response = self
             .http
-            .get(format!("{}/v1/quotes/{quote_id}", self.base_url))
+            .get(format!("{}/api/v1/quotes/{quote_id}", self.base_url))
             .headers(self.headers(actor)?)
             .send()
             .await?;
@@ -110,7 +116,7 @@ impl QuoteApiClient {
     pub async fn list(&self, actor: &AuthContext) -> Result<Vec<QuoteResponse>, AppError> {
         let response = self
             .http
-            .get(format!("{}/v1/quotes", self.base_url))
+            .get(format!("{}/api/v1/quotes", self.base_url))
             .headers(self.headers(actor)?)
             .send()
             .await?;
@@ -165,67 +171,51 @@ async fn decode<T: DeserializeOwned>(
     serde_json::from_slice(&bytes).map_err(AppError::from)
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct QuoteRequest {
-    pub company_name: String,
-    pub industry: String,
+    pub organization_name: String,
+    pub contact_name: String,
+    pub contact_email: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub website: Option<String>,
     pub employee_count: u32,
-    pub annual_revenue_usd: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annual_revenue_band: Option<String>,
     pub frameworks: Vec<String>,
-    pub cloud_providers: Vec<String>,
-    pub handles_phi: bool,
-    pub handles_payment_cards: bool,
-    pub security_program_maturity: String,
-    pub target_timeline: String,
-    pub existing_certifications: Vec<String>,
+    pub current_stage: String,
+    pub infrastructure: Vec<String>,
+    pub data_sensitivity: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_date: Option<String>,
+    pub has_security_program: bool,
+    pub has_policies: bool,
+    pub has_risk_assessment: bool,
+    pub has_incident_response_plan: bool,
+    pub has_vendor_management: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    pub context_key: String,
+    pub answers_version: u8,
 }
 
 impl QuoteRequest {
-    fn analysis_notes(&self) -> Option<String> {
-        let mut lines = vec![
-            format!(
-                "Security program maturity: {}",
-                self.security_program_maturity
-            ),
-            format!("Requested timeline: {}", self.target_timeline),
-            format!("Handles protected health information: {}", self.handles_phi),
-            format!("Handles payment-card data: {}", self.handles_payment_cards),
-        ];
-        if let Some(revenue) = self.annual_revenue_usd {
-            lines.push(format!("Annual revenue USD: {revenue}"));
-        }
-        if !self.cloud_providers.is_empty() {
-            lines.push(format!(
-                "Cloud providers: {}",
-                self.cloud_providers.join(", ")
-            ));
-        }
-        if !self.existing_certifications.is_empty() {
-            lines.push(format!(
-                "Existing certifications: {}",
-                self.existing_certifications.join(", ")
-            ));
-        }
-        if let Some(notes) = self.notes.as_deref() {
-            lines.push(format!("Additional customer notes:\n{notes}"));
-        }
-        Some(lines.join("\n"))
+    pub fn fixed_context_key() -> &'static str {
+        CANONICAL_CONTEXT_KEY
+    }
+
+    pub const fn answers_version() -> u8 {
+        ANSWERS_VERSION
     }
 }
 
-#[derive(Serialize)]
-struct ApiCreateQuoteRequest<'a> {
-    frameworks: &'a [String],
-    notes: Option<String>,
-    organization: ApiOrganization<'a>,
-}
-
-#[derive(Serialize)]
-struct ApiOrganization<'a> {
-    employee_count: u32,
-    industry: &'a str,
-    legal_name: &'a str,
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ApiQuoteSubmissionResponse {
+    quote_id: Uuid,
+    status: String,
+    stream_url: String,
+    created_at: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -247,6 +237,20 @@ pub struct QuoteResponse {
     pub estimate: Option<QuoteEstimate>,
     pub analysis_summary: Option<String>,
     pub error_code: Option<String>,
+}
+
+impl QuoteResponse {
+    fn from_submission(request: &QuoteRequest, submission: ApiQuoteSubmissionResponse) -> Self {
+        Self {
+            id: submission.quote_id,
+            status: submission.status,
+            company_name: request.organization_name.clone(),
+            frameworks: request.frameworks.clone(),
+            estimate: None,
+            analysis_summary: None,
+            error_code: None,
+        }
+    }
 }
 
 impl From<ApiQuoteRecord> for QuoteResponse {
@@ -291,9 +295,10 @@ pub fn quote_page(actor: &AuthContext, quotes: &[QuoteResponse]) -> Markup {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
+                meta name="canonical-quote-account" content=(actor.user_id);
                 title { "Get a quote · canonical.plus" }
                 style {
-                    "body{font-family:ui-sans-serif,system-ui,sans-serif;max-width:64rem;margin:0 auto;padding:2rem;line-height:1.5}.card{border:1px solid #8886;border-radius:.75rem;padding:1.25rem;margin:1rem 0}label{display:block;margin:.75rem 0}input,textarea,select,button{font:inherit;padding:.65rem}input,textarea,select{box-sizing:border-box;width:100%}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.6rem}.grid label{display:flex;gap:.5rem;align-items:center;margin:0}.grid input{width:auto}.muted{opacity:.72}.error{color:#b42318}.quote-total{font-size:1.5rem;font-weight:700}"
+                    "body{font-family:ui-sans-serif,system-ui,sans-serif;max-width:64rem;margin:0 auto;padding:2rem;line-height:1.5}.card{border:1px solid #8886;border-radius:.75rem;padding:1.25rem;margin:1rem 0}label{display:block;margin:.75rem 0}input,textarea,select,button{font:inherit;padding:.65rem}input,textarea,select{box-sizing:border-box;width:100%}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.6rem}.grid label{display:flex;gap:.5rem;align-items:center;margin:0}.grid input{width:auto}.muted{opacity:.72}.error{color:#b42318}.quote-total{font-size:1.5rem;font-weight:700}[data-opto-state=\"pending\"]{border-color:#b7791f}[data-opto-state=\"failed\"]{border-color:#b42318}button[disabled]{opacity:.6;cursor:wait}"
                 }
                 script type="module" src="/app-assets/app.js" {}
             }
@@ -304,66 +309,109 @@ pub fn quote_page(actor: &AuthContext, quotes: &[QuoteResponse]) -> Markup {
                     p class="muted" {
                         "Signed in as " (actor.email) ". Your answers are private to your account."
                     }
-                    form class="card" method="post" action="/u/quote"
-                        hx-post="/u/quote" hx-target="#quote-results" hx-swap="innerHTML" {
+                    p class="muted" {
+                        "Do not submit credentials, protected health information, cardholder data, or production evidence."
+                    }
+                    form class="card" method="post" action="/u/quote" data-opto-quote="true"
+                        hx-post="/u/quote" hx-target="#quote-results" hx-swap="afterbegin" {
                         input type="hidden" name="csrf" value=(csrf);
-                        h2 { "Company" }
-                        label { "Company name" input name="company_name" required maxlength="200"; }
-                        label { "Industry" input name="industry" required maxlength="120"; }
-                        label { "Number of employees"
+                        input type="hidden" name="client_request_id" value=(Uuid::new_v4());
+
+                        h2 { "Organization and contact" }
+                        label { "Organization name" input name="organization_name" required maxlength="200"; }
+                        label { "Contact name" input name="contact_name" required maxlength="160"; }
+                        label { "Verified contact email"
+                            input value=(actor.email) readonly aria-readonly="true";
+                        }
+                        label { "Public website (optional)"
+                            input type="url" name="website" maxlength="2048" placeholder="https://example.com";
+                        }
+                        label { "Number of employees and long-term contractors"
                             input type="number" name="employee_count" min="1" max="1000000" required;
                         }
-                        label { "Annual revenue in USD (optional)"
-                            input type="number" name="annual_revenue_usd" min="0" max="10000000000000";
+                        label { "Annual revenue band (optional)"
+                            select name="annual_revenue_band" {
+                                option value="" { "Prefer not to say" }
+                                option value="pre_revenue" { "Pre-revenue" }
+                                option value="under_1m" { "Under $1M" }
+                                option value="1m_10m" { "$1M–$10M" }
+                                option value="10m_50m" { "$10M–$50M" }
+                                option value="50m_250m" { "$50M–$250M" }
+                                option value="over_250m" { "Over $250M" }
+                                option value="prefer_not_to_say" { "Prefer not to say (recorded)" }
+                            }
                         }
 
                         h2 { "Frameworks" }
                         div class="grid" {
-                            label { input type="checkbox" name="soc2"; "SOC 2" }
-                            label { input type="checkbox" name="nist_csf"; "NIST CSF" }
+                            label { input type="checkbox" name="soc2_type_1"; "SOC 2 Type I" }
+                            label { input type="checkbox" name="soc2_type_2"; "SOC 2 Type II" }
+                            label { input type="checkbox" name="nist_csf_2"; "NIST CSF 2.0" }
                             label { input type="checkbox" name="nist_800_53"; "NIST SP 800-53" }
                             label { input type="checkbox" name="hipaa"; "HIPAA" }
                             label { input type="checkbox" name="iso_27001"; "ISO 27001" }
-                            label { input type="checkbox" name="pci_dss"; "PCI DSS" }
+                            label { input type="checkbox" name="pci_dss_4"; "PCI DSS 4" }
                             label { input type="checkbox" name="fedramp"; "FedRAMP" }
                             label { input type="checkbox" name="gdpr"; "GDPR" }
+                            label { input type="checkbox" name="custom"; "Custom scope" }
                         }
 
-                        h2 { "Scope" }
-                        label { "Security program maturity"
-                            select name="security_program_maturity" required {
+                        h2 { "Program stage" }
+                        label { "Current stage"
+                            select name="current_stage" required {
                                 option value="" { "Choose a stage" }
-                                option value="none" { "Starting from scratch" }
-                                option value="informal" { "Informal practices" }
-                                option value="documented" { "Controls documented" }
-                                option value="managed" { "Managed program" }
-                                option value="audited" { "Previously audited" }
+                                option value="exploring" { "Exploring" }
+                                option value="readiness" { "Readiness" }
+                                option value="remediation" { "Remediation" }
+                                option value="audit_ready" { "Audit ready" }
+                                option value="renewal" { "Renewal" }
                             }
                         }
-                        label { "Target timeline"
-                            select name="target_timeline" required {
-                                option value="" { "Choose a timeline" }
-                                option value="under_3_months" { "Under 3 months" }
-                                option value="3_to_6_months" { "3–6 months" }
-                                option value="6_to_12_months" { "6–12 months" }
-                                option value="over_12_months" { "More than 12 months" }
-                                option value="unsure" { "Still exploring" }
-                            }
+                        label { "Target date (optional)"
+                            input type="date" name="target_date";
                         }
+
+                        h2 { "Infrastructure" }
                         div class="grid" {
-                            label { input type="checkbox" name="handles_phi"; "Handles protected health information" }
-                            label { input type="checkbox" name="handles_payment_cards"; "Handles payment-card data" }
+                            label { input type="checkbox" name="infra_aws"; "AWS" }
+                            label { input type="checkbox" name="infra_azure"; "Azure" }
+                            label { input type="checkbox" name="infra_gcp"; "GCP" }
+                            label { input type="checkbox" name="infra_supabase"; "Supabase" }
+                            label { input type="checkbox" name="infra_on_prem"; "On-premises" }
+                            label { input type="checkbox" name="infra_colocation"; "Colocation" }
+                            label { input type="checkbox" name="infra_saas_only"; "SaaS-only" }
+                            label { input type="checkbox" name="infra_multi_cloud"; "Multi-cloud" }
+                            label { input type="checkbox" name="infra_other"; "Other" }
                         }
-                        label { "Cloud providers (comma-separated)"
-                            input name="cloud_providers" maxlength="640" placeholder="AWS, GCP, Azure, Cloudflare";
+
+                        h2 { "Data sensitivity" }
+                        div class="grid" {
+                            label { input type="checkbox" name="data_public"; "Public" }
+                            label { input type="checkbox" name="data_internal"; "Internal" }
+                            label { input type="checkbox" name="data_confidential"; "Confidential" }
+                            label { input type="checkbox" name="data_pii"; "PII" }
+                            label { input type="checkbox" name="data_phi"; "PHI" }
+                            label { input type="checkbox" name="data_pci"; "Payment-card data" }
+                            label { input type="checkbox" name="data_government_cui"; "Government CUI" }
+                            label { input type="checkbox" name="data_customer_secrets"; "Customer secrets" }
+                            label { input type="checkbox" name="data_other"; "Other" }
                         }
-                        label { "Existing certifications (comma-separated)"
-                            input name="existing_certifications" maxlength="1920" placeholder="ISO 27001, SOC 2 Type II";
+
+                        h2 { "Current readiness signals" }
+                        div class="grid" {
+                            label { input type="checkbox" name="has_security_program"; "Named security owner and operating program" }
+                            label { input type="checkbox" name="has_policies"; "Reviewed security and privacy policies" }
+                            label { input type="checkbox" name="has_risk_assessment"; "Current documented risk assessment" }
+                            label { input type="checkbox" name="has_incident_response_plan"; "Exercised incident-response plan" }
+                            label { input type="checkbox" name="has_vendor_management"; "Third-party risk and vendor review process" }
                         }
                         label { "Anything else we should know"
-                            textarea name="notes" rows="5" maxlength="4000" {}
+                            textarea name="notes" rows="5" maxlength="5000" {}
                         }
                         button type="submit" { "Analyze my quote" }
+                        p id="quote-sync-status" class="muted" aria-live="polite" {
+                            "Writes are saved locally before delivery."
+                        }
                     }
                     section id="quote-results" aria-live="polite" {
                         @for quote in quotes {
@@ -409,7 +457,7 @@ pub fn quote_status_fragment(quote: &QuoteResponse) -> Markup {
             }
         };
     }
-    if quote.status == "completed" {
+    if matches!(quote.status.as_str(), "completed" | "ready") {
         return html! {
             article id={ "quote-" (quote.id) } class="card" {
                 h2 { (quote.company_name) }
@@ -444,21 +492,38 @@ pub fn quote_status_fragment(quote: &QuoteResponse) -> Markup {
 mod tests {
     use super::*;
 
+    fn fixture_request() -> QuoteRequest {
+        serde_json::from_str(include_str!("../fixtures/quote/v1/request.json")).unwrap()
+    }
+
     #[test]
-    fn browser_payload_cannot_select_a_database_context() {
-        let frameworks = vec!["soc2".to_owned()];
-        let payload = ApiCreateQuoteRequest {
-            frameworks: &frameworks,
-            notes: None,
-            organization: ApiOrganization {
-                employee_count: 10,
-                industry: "Software",
-                legal_name: "Example",
-            },
-        };
-        let value = serde_json::to_value(payload).unwrap();
-        assert!(value.get("context_record_id").is_none());
-        assert!(value.get("markdown_context").is_none());
+    fn canonical_fixture_serializes_without_transport_drift() {
+        let request = fixture_request();
+        let expected: JsonValue =
+            serde_json::from_str(include_str!("../fixtures/quote/v1/request.json")).unwrap();
+        assert_eq!(serde_json::to_value(&request).unwrap(), expected);
+        assert_eq!(request.context_key, CANONICAL_CONTEXT_KEY);
+        assert_eq!(request.answers_version, ANSWERS_VERSION);
+        assert!(expected.get("contextRecordId").is_none());
+        assert!(expected.get("markdown_context").is_none());
+        assert!(expected.get("userId").is_none());
+    }
+
+    #[test]
+    fn maps_the_canonical_submission_fixture() {
+        let submission: ApiQuoteSubmissionResponse = serde_json::from_str(include_str!(
+            "../fixtures/quote/v1/submission-response.json"
+        ))
+        .unwrap();
+        let request = fixture_request();
+        let quote = QuoteResponse::from_submission(&request, submission);
+        assert_eq!(
+            quote.id,
+            Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap()
+        );
+        assert_eq!(quote.status, "queued");
+        assert_eq!(quote.company_name, "Example Company");
+        assert!(quote.frameworks.contains(&"nist_800_53".to_owned()));
     }
 
     #[test]
@@ -472,8 +537,8 @@ mod tests {
             },
             "context_record_id": Uuid::nil(),
             "error_code": null,
-            "frameworks": ["soc2"],
-            "gemini_model": "gemini-3.1-pro-preview",
+            "frameworks": ["soc2_type_2"],
+            "gemini_model": "gemini-3.6-flash",
             "organization_name": "Example",
             "persistence": "postgres",
             "quote_id": Uuid::nil(),

@@ -51,6 +51,8 @@ test("playwright rejects hostile login origins and clears origin data on logout"
   assert.match(csp, /script-src 'self';/);
   assert.match(csp, /frame-ancestors 'none'/);
   assert.doesNotMatch(csp, /script-src[^;]*'unsafe-inline'/);
+  assert.doesNotMatch(csp, /'wasm-unsafe-eval'/);
+  assert.doesNotMatch(csp, /(?:^|\s)'unsafe-eval'(?:\s|;|$)/);
 
   // Prove that Chromium enforces the application CSP, not merely that the
   // response contains a plausible header string.

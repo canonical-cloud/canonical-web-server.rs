@@ -351,8 +351,7 @@ pub async fn begin_admin_transaction(
 mod tests {
     use super::{
         begin_admin_transaction, begin_session_revocation_transaction,
-        begin_shared_auth_transaction, database_now, verify_runtime_database_role,
-        AssuranceLevel,
+        begin_shared_auth_transaction, database_now, verify_runtime_database_role, AssuranceLevel,
     };
     use sea_orm::{prelude::DateTimeUtc, Database};
     use std::time::SystemTime;
@@ -373,9 +372,11 @@ mod tests {
             .await
             .unwrap();
         transaction.commit().await.unwrap();
-        assert!(begin_shared_auth_transaction(&db, " canonical:customer:123")
-            .await
-            .is_err());
+        assert!(
+            begin_shared_auth_transaction(&db, " canonical:customer:123")
+                .await
+                .is_err()
+        );
         assert!(begin_shared_auth_transaction(&db, "canonical\nsubject")
             .await
             .is_err());

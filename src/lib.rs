@@ -6,7 +6,7 @@ pub mod app;
 pub mod auth;
 pub mod command;
 pub mod database;
-pub mod edge;
+pub mod env_compat;
 pub mod error;
 pub mod integrations;
 pub mod metrics;

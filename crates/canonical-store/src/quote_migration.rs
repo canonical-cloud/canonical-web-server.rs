@@ -1,4 +1,4 @@
-use sea_orm::{DatabaseBackend, Statement};
+use sea_orm::DatabaseBackend;
 use sea_orm_migration::prelude::*;
 
 /// Quote intake has an independent migration ledger so the established
@@ -99,11 +99,7 @@ impl MigrationTrait for AddQuoteIntake {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(QuoteRequest::OwnerSubject)
-                            .text()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(QuoteRequest::OwnerSubject).text().not_null())
                     .col(ColumnDef::new(QuoteRequest::OwnerEmail).string())
                     .col(
                         ColumnDef::new(QuoteRequest::CompanyName)
