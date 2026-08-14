@@ -165,17 +165,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   public.sync_change,
   public.sync_receipt,
   public.audit_engagement,
-  public.engagement_note,
-  public.quote_request
-TO canonical_web_server;
-
-
-GRANT SELECT ON TABLE
-  public.canonical_context
-TO canonical_web_server;
-
-GRANT SELECT, INSERT, UPDATE ON TABLE
-  public.compliance_quote
+  public.engagement_note
 TO canonical_web_server;
 
 -- No current customer table uses a sequence. A future sequence must be

@@ -238,6 +238,12 @@ proves the SeaORM migrations converge with it on every change (the
 review a migration instead of hand-writing DDL — connect via the direct
 connection or session pooler (5432), never the transaction pooler:
 
+The web/session schema deliberately has no quote or Canonical-context tables.
+Those records belong to the dedicated API data plane. Any legacy web-owned
+quote data needs an explicit export, retention, and decommission plan reviewed
+with that API owner; this migration source neither creates nor automatically
+drops it.
+
 ```sh
 dpm diff   --source deploy/postgres/schema.sql --target "$MIGRATION_DATABASE_URL"            --shadow "$SHADOW_DATABASE_URL"      # review the SQL
 dpm verify --source deploy/postgres/schema.sql --target "$MIGRATION_DATABASE_URL"            --shadow "$SHADOW_DATABASE_URL"      # rehearse on a shadow replica

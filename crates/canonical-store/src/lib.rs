@@ -1,6 +1,5 @@
 pub mod entity;
 pub mod migration;
-pub mod quote_migration;
 
 use sea_orm::{
     prelude::DateTimeUtc, ConnectOptions, ConnectionTrait, Database, DatabaseBackend,
