@@ -296,7 +296,7 @@ pub fn quote_page(actor: &AuthContext, quotes: &[QuoteResponse]) -> Markup {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 meta name="canonical-quote-account" content=(actor.user_id);
-                title { "Get a quote · canonical.plus" }
+                title { "Readiness assessment · canonical.plus" }
                 style {
                     "body{font-family:ui-sans-serif,system-ui,sans-serif;max-width:64rem;margin:0 auto;padding:2rem;line-height:1.5}.card{border:1px solid #8886;border-radius:.75rem;padding:1.25rem;margin:1rem 0}label{display:block;margin:.75rem 0}input,textarea,select,button{font:inherit;padding:.65rem}input,textarea,select{box-sizing:border-box;width:100%}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.6rem}.grid label{display:flex;gap:.5rem;align-items:center;margin:0}.grid input{width:auto}.muted{opacity:.72}.error{color:#b42318}.quote-total{font-size:1.5rem;font-weight:700}[data-opto-state=\"pending\"]{border-color:#b7791f}[data-opto-state=\"failed\"]{border-color:#b42318}button[disabled]{opacity:.6;cursor:wait}"
                 }
@@ -305,15 +305,15 @@ pub fn quote_page(actor: &AuthContext, quotes: &[QuoteResponse]) -> Markup {
             body {
                 nav { a href="/" { "← canonical.plus" } }
                 main {
-                    h1 { "Get a compliance quote in less than 5 minutes" }
+                    h1 { "Scope your readiness plan" }
                     p class="muted" {
                         "Signed in as " (actor.email) ". Your answers are private to your account."
                     }
                     p class="muted" {
                         "Do not submit credentials, protected health information, cardholder data, or production evidence."
                     }
-                    form class="card" method="post" action="/u/quote" data-opto-quote="true"
-                        hx-post="/u/quote" hx-target="#quote-results" hx-swap="afterbegin" {
+                    form class="card" method="post" action="/u/readiness" data-opto-quote="true"
+                        hx-post="/u/readiness" hx-target="#quote-results" hx-swap="afterbegin" {
                         input type="hidden" name="csrf" value=(csrf);
                         input type="hidden" name="client_request_id" value=(Uuid::new_v4());
 
@@ -363,7 +363,7 @@ pub fn quote_page(actor: &AuthContext, quotes: &[QuoteResponse]) -> Markup {
                                 option value="exploring" { "Exploring" }
                                 option value="readiness" { "Readiness" }
                                 option value="remediation" { "Remediation" }
-                                option value="audit_ready" { "Audit ready" }
+                                option value="audit_ready" { "Preparing for independent review" }
                                 option value="renewal" { "Renewal" }
                             }
                         }
@@ -408,7 +408,7 @@ pub fn quote_page(actor: &AuthContext, quotes: &[QuoteResponse]) -> Markup {
                         label { "Anything else we should know"
                             textarea name="notes" rows="5" maxlength="5000" {}
                         }
-                        button type="submit" { "Analyze my quote" }
+                        button type="submit" { "Build my readiness scope" }
                         p id="quote-sync-status" class="muted" aria-live="polite" {
                             "Writes are saved locally before delivery."
                         }
@@ -431,11 +431,11 @@ pub fn quote_detail_page(actor: &AuthContext, quote: &QuoteResponse) -> Markup {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
-                title { "Quote · canonical.plus" }
+                title { "Readiness scope · canonical.plus" }
             }
             body {
                 main {
-                    p { a href="/u/quote" { "← All quotes" } }
+                    p { a href="/u/readiness" { "← All readiness scopes" } }
                     p class="muted" { "Signed in as " (actor.email) }
                     (quote_status_fragment(quote))
                 }
@@ -448,11 +448,11 @@ pub fn quote_status_fragment(quote: &QuoteResponse) -> Markup {
     if matches!(quote.status.as_str(), "queued" | "analyzing") {
         return html! {
             article id={ "quote-" (quote.id) } class="card"
-                hx-get={ "/u/quote/" (quote.id) }
+                hx-get={ "/u/readiness/" (quote.id) }
                 hx-trigger="every 2s"
                 hx-swap="outerHTML" {
                 h2 { (quote.company_name) }
-                p { "Canonical's secure analysis is running." }
+                p { "Canonical's bounded readiness analysis is running." }
                 p class="muted" { "This status refreshes automatically." }
             }
         };
@@ -467,10 +467,10 @@ pub fn quote_status_fragment(quote: &QuoteResponse) -> Markup {
                     }
                 }
                 p {
-                    (quote.analysis_summary.as_deref().unwrap_or("Your preliminary quote is ready."))
+                    (quote.analysis_summary.as_deref().unwrap_or("Your preliminary readiness scope is ready."))
                 }
                 p class="muted" {
-                    "This is a preliminary estimate, not an audit opinion or certification."
+                    "This is readiness planning support, not an audit opinion, attestation, certification, or legal conclusion."
                 }
             }
         };
@@ -479,7 +479,7 @@ pub fn quote_status_fragment(quote: &QuoteResponse) -> Markup {
         article id={ "quote-" (quote.id) } class="card" {
             h2 { (quote.company_name) }
             p class="error" role="alert" {
-                "We could not finish this quote. Please review your answers and try again."
+                "We could not finish this readiness scope. Please review your answers and try again."
             }
             @if let Some(code) = quote.error_code.as_deref() {
                 p class="muted" { "Reference: " (code) }
