@@ -79,6 +79,7 @@ pub async fn submit(
     if let Err(error) = require_csrf(&actor, &headers, Some(&form.csrf)) {
         return error.into_response();
     }
+    let idempotency_key = form.client_request_id;
     let request = match form.into_request(&actor.email) {
         Ok(request) => request,
         Err(AppError::BadRequest(message)) => return form_error(&headers, &message),
@@ -87,7 +88,7 @@ pub async fn submit(
     let Some(client) = state.quote_api.as_ref() else {
         return AppError::ServiceUpstream.into_response();
     };
-    match client.create(&actor, &request).await {
+    match client.create(&actor, &request, idempotency_key).await {
         Ok(record) if headers.contains_key("hx-request") => {
             quote_api::quote_status_fragment(&record).into_response()
         }
@@ -100,6 +101,7 @@ pub async fn submit(
 #[derive(Debug, Deserialize)]
 pub struct QuoteForm {
     csrf: String,
+    client_request_id: Uuid,
     organization_name: String,
     contact_name: String,
     #[serde(default)]
@@ -429,6 +431,9 @@ fn form_error(headers: &HeaderMap, message: &str) -> Response {
             .headers_mut()
             .insert("hx-retarget", HeaderValue::from_static("#quote-results"));
         response
+            .headers_mut()
+            .insert("hx-reswap", HeaderValue::from_static("afterbegin"));
+        response
     } else {
         (StatusCode::UNPROCESSABLE_ENTITY, fragment).into_response()
     }
@@ -441,6 +446,7 @@ mod tests {
     fn fixture_form() -> QuoteForm {
         QuoteForm {
             csrf: "csrf".into(),
+            client_request_id: Uuid::new_v4(),
             organization_name: "Example Company".into(),
             contact_name: "Taylor Example".into(),
             website: "https://example.com".into(),

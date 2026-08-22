@@ -1,10 +1,12 @@
 import htmx from "htmx.org";
 import "htmx-ext-ws";
+import type { QuoteWriteQueue } from "./quote-optimistic";
 import { CanonicalSyncClient, type CanonicalSyncClientOptions } from "./sync";
 
 declare global {
   interface Window {
     htmx: typeof htmx;
+    canonicalQuoteWrites?: QuoteWriteQueue;
     canonicalSync?: CanonicalSyncClient;
     bootstrapCanonicalSync: (options: CanonicalSyncClientOptions) => Promise<CanonicalSyncClient>;
   }
@@ -28,8 +30,28 @@ function handleSocketAuthLoss(): void {
     return;
   }
   handlingSocketAuthLoss = true;
-  const clear = window.canonicalSync?.clearLocalData() ?? Promise.resolve();
+  const clear = Promise.all([
+    window.canonicalSync?.clearLocalData() ?? Promise.resolve(),
+    clearQuoteWrites(),
+  ]);
   void clear.finally(() => window.location.assign("/login"));
+}
+
+async function clearQuoteWrites(): Promise<void> {
+  if (window.canonicalQuoteWrites !== undefined) {
+    await window.canonicalQuoteWrites.clearLocalData();
+    return;
+  }
+  // Do not instantiate the WebAssembly-backed quote client merely to clear a
+  // different application's store from the dashboard. Quote pages clear their
+  // live queue here; the logout response's Clear-Site-Data header remains the
+  // authoritative origin-wide cleanup for data left by an earlier page.
+  const key = document.querySelector<HTMLMetaElement>('meta[name="canonical-quote-account"]')?.content;
+  if (key !== undefined && key.length > 0) {
+    const { QuoteWriteQueue } = await import("./quote-optimistic");
+    const queue = await QuoteWriteQueue.open(key);
+    await queue.clearLocalData();
+  }
 }
 
 htmx.on("htmx:wsBeforeMessage", (event) => {
@@ -89,12 +111,32 @@ if (accountKey !== undefined && accountKey.length > 0) {
   void bootstrapCanonicalSync({ accountKey }).then(wireDraftNoteUi);
 }
 
+if (document.querySelector('form[data-opto-quote="true"]') !== null) {
+  void import("./quote-optimistic")
+    .then(({ wireQuoteOptimisticWrites }) => wireQuoteOptimisticWrites(htmx))
+    .then((queue) => {
+      if (queue !== undefined) {
+        window.canonicalQuoteWrites = queue;
+      }
+    })
+    .catch(() => {
+      const status = document.querySelector<HTMLElement>("#quote-sync-status");
+      if (status !== null) {
+        status.dataset.state = "failed";
+        status.textContent = "Local optimistic writes are unavailable; reload before submitting.";
+      }
+    });
+}
+
 const logoutForm = document.querySelector<HTMLFormElement>('form[action="/auth/logout"]');
 logoutForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   void (async () => {
     try {
-      await window.canonicalSync?.clearLocalData();
+      await Promise.all([
+        window.canonicalSync?.clearLocalData() ?? Promise.resolve(),
+        clearQuoteWrites(),
+      ]);
     } finally {
       logoutForm.submit();
     }

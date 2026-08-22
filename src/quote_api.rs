@@ -73,11 +73,17 @@ impl QuoteApiClient {
         &self,
         actor: &AuthContext,
         request: &QuoteRequest,
+        idempotency_key: Uuid,
     ) -> Result<QuoteResponse, AppError> {
+        let mut headers = self.headers(actor)?;
+        headers.insert(
+            "idempotency-key",
+            HeaderValue::from_str(&idempotency_key.to_string()).map_err(|_| AppError::Crypto)?,
+        );
         let response = self
             .http
             .post(format!("{}/api/v1/quotes", self.base_url))
-            .headers(self.headers(actor)?)
+            .headers(headers)
             .json(request)
             .send()
             .await?;
@@ -289,9 +295,10 @@ pub fn quote_page(actor: &AuthContext, quotes: &[QuoteResponse]) -> Markup {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
+                meta name="canonical-quote-account" content=(actor.user_id);
                 title { "Get a quote · canonical.plus" }
                 style {
-                    "body{font-family:ui-sans-serif,system-ui,sans-serif;max-width:64rem;margin:0 auto;padding:2rem;line-height:1.5}.card{border:1px solid #8886;border-radius:.75rem;padding:1.25rem;margin:1rem 0}label{display:block;margin:.75rem 0}input,textarea,select,button{font:inherit;padding:.65rem}input,textarea,select{box-sizing:border-box;width:100%}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.6rem}.grid label{display:flex;gap:.5rem;align-items:center;margin:0}.grid input{width:auto}.muted{opacity:.72}.error{color:#b42318}.quote-total{font-size:1.5rem;font-weight:700}"
+                    "body{font-family:ui-sans-serif,system-ui,sans-serif;max-width:64rem;margin:0 auto;padding:2rem;line-height:1.5}.card{border:1px solid #8886;border-radius:.75rem;padding:1.25rem;margin:1rem 0}label{display:block;margin:.75rem 0}input,textarea,select,button{font:inherit;padding:.65rem}input,textarea,select{box-sizing:border-box;width:100%}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.6rem}.grid label{display:flex;gap:.5rem;align-items:center;margin:0}.grid input{width:auto}.muted{opacity:.72}.error{color:#b42318}.quote-total{font-size:1.5rem;font-weight:700}[data-opto-state=\"pending\"]{border-color:#b7791f}[data-opto-state=\"failed\"]{border-color:#b42318}button[disabled]{opacity:.6;cursor:wait}"
                 }
                 script type="module" src="/app-assets/app.js" {}
             }
@@ -305,9 +312,10 @@ pub fn quote_page(actor: &AuthContext, quotes: &[QuoteResponse]) -> Markup {
                     p class="muted" {
                         "Do not submit credentials, protected health information, cardholder data, or production evidence."
                     }
-                    form class="card" method="post" action="/u/quote"
-                        hx-post="/u/quote" hx-target="#quote-results" hx-swap="innerHTML" {
+                    form class="card" method="post" action="/u/quote" data-opto-quote="true"
+                        hx-post="/u/quote" hx-target="#quote-results" hx-swap="afterbegin" {
                         input type="hidden" name="csrf" value=(csrf);
+                        input type="hidden" name="client_request_id" value=(Uuid::new_v4());
 
                         h2 { "Organization and contact" }
                         label { "Organization name" input name="organization_name" required maxlength="200"; }
@@ -401,6 +409,9 @@ pub fn quote_page(actor: &AuthContext, quotes: &[QuoteResponse]) -> Markup {
                             textarea name="notes" rows="5" maxlength="5000" {}
                         }
                         button type="submit" { "Analyze my quote" }
+                        p id="quote-sync-status" class="muted" aria-live="polite" {
+                            "Writes are saved locally before delivery."
+                        }
                     }
                     section id="quote-results" aria-live="polite" {
                         @for quote in quotes {

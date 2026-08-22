@@ -5,10 +5,13 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
+    "opto:build": "npm install --ignore-scripts --no-audit --no-fund --package-lock=false --prefix ../vendor/opto-sync-clients/clients/ts && npm run build --prefix ../vendor/opto-sync-clients/clients/ts",
+    "prepare": "npm run opto:build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@opto-sync/client": "file:../vendor/opto-sync-clients/clients/ts",
     "htmx-ext-ws": "2.0.4",
     "htmx.org": "2.0.10",
     "idb": "8.0.3"
@@ -17,7 +20,7 @@
     "@types/node": "26.1.2",
     "fake-indexeddb": "6.2.5",
     "typescript": "7.0.2",
-    "vite": "8.2.0",
+    "vite": "8.2.1",
     "vitest": "4.1.10"
   }
 }

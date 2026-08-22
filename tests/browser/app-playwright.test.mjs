@@ -177,6 +177,10 @@ test("playwright: application and marketing routes carry their tailored security
   assert.match(marketingHeaders["content-security-policy"], /script-src 'self';/);
   assert.doesNotMatch(appHeaders["content-security-policy"], /script-src 'self' 'unsafe-inline'/);
   assert.doesNotMatch(marketingHeaders["content-security-policy"], /script-src 'self' 'unsafe-inline'/);
+  assert.doesNotMatch(appHeaders["content-security-policy"], /'wasm-unsafe-eval'/);
+  assert.doesNotMatch(marketingHeaders["content-security-policy"], /'wasm-unsafe-eval'/);
+  assert.doesNotMatch(appHeaders["content-security-policy"], /(?:^|\s)'unsafe-eval'(?:\s|;|$)/);
+  assert.doesNotMatch(marketingHeaders["content-security-policy"], /(?:^|\s)'unsafe-eval'(?:\s|;|$)/);
 });
 
 test("playwright: authenticated session and CSRF drive the engagement lifecycle through htmx", async (t) => {

@@ -1,6 +1,7 @@
 use crate::auth::AuthContext;
 use crate::db::entity::{audit_engagement, engagement_note};
 use maud::{html, Markup, DOCTYPE};
+use serde_json::Value;
 
 fn layout(title: &str, body: Markup, csrf: Option<&str>, account_key: Option<&str>) -> Markup {
     html! {
@@ -18,7 +19,7 @@ fn layout(title: &str, body: Markup, csrf: Option<&str>, account_key: Option<&st
                 }
                 title { (title) " · canonical.cloud" }
                 style {
-                    "body{font-family:ui-sans-serif,system-ui,sans-serif;max-width:72rem;margin:0 auto;padding:2rem;line-height:1.5}nav{display:flex;justify-content:space-between;align-items:center}main{margin-top:3rem}.card{border:1px solid #8886;border-radius:.75rem;padding:1.25rem;margin:1rem 0}label{display:block;margin:.75rem 0}input,textarea,button{font:inherit;padding:.65rem}input,textarea{box-sizing:border-box;width:100%}button{cursor:pointer}.muted{opacity:.7}.error{color:#b42318}#sync-status[data-state=offline]{color:#b54708}#sync-status[data-state=synced]{color:#067647}"
+                    "body{font-family:ui-sans-serif,system-ui,sans-serif;max-width:72rem;margin:0 auto;padding:2rem;line-height:1.5}nav{display:flex;justify-content:space-between;align-items:center}main{margin-top:3rem}.card{border:1px solid #8886;border-radius:.75rem;padding:1.25rem;margin:1rem 0}label{display:block;margin:.75rem 0}input,textarea,select,button{font:inherit;padding:.65rem}input,textarea,select{box-sizing:border-box;width:100%}button{cursor:pointer}.framework-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:.5rem}.framework-grid label{display:flex;gap:.5rem;align-items:center;margin:0}.framework-grid input{width:auto}.quote-total{font-size:1.5rem;font-weight:700}.muted{opacity:.7}.error{color:#b42318}#sync-status[data-state=offline]{color:#b54708}#sync-status[data-state=synced]{color:#067647}"
                 }
                 script type="module" src="/app-assets/app.js" {}
             }
@@ -29,6 +30,8 @@ fn layout(title: &str, body: Markup, csrf: Option<&str>, account_key: Option<&st
                         a href="/app" { "Application" }
                         " · "
                         a href="/app/engagements" { "Engagements" }
+                        " · "
+                        a href="/u/quote" { "Get a quote" }
                     }
                 }
                 (body)
@@ -283,6 +286,157 @@ fn status_label(status: &str) -> &'static str {
         "in_audit" => "In audit",
         "complete" => "Complete",
         _ => "Unknown status",
+    }
+}
+
+pub fn quote_page(email: &str) -> Markup {
+    layout(
+        "Get a quote",
+        html! {
+            main {
+                header {
+                    p { a href="/" { "← canonical.plus" } }
+                    h1 { "Get a compliance quote in less than 5 minutes" }
+                    p class="muted" {
+                        "Signed in"
+                        @if !email.is_empty() { " as " (email) }
+                        ". We use your answers to estimate scope; this is not an audit opinion or certification."
+                    }
+                }
+                form class="card" method="post" action="/u/quote"
+                    hx-post="/u/quote" hx-target="#quote-result" hx-swap="innerHTML"
+                    hx-indicator="#quote-progress" {
+                    h2 { "Company" }
+                    label { "Company name" input name="company_name" required maxlength="200"; }
+                    label { "Industry" input name="industry" required maxlength="120"; }
+                    label { "Number of employees"
+                        input type="number" name="employee_count" min="1" max="1000000" required;
+                    }
+                    label { "Annual revenue in USD (optional)"
+                        input type="number" name="annual_revenue_usd" min="0" max="10000000000000";
+                    }
+
+                    h2 { "Frameworks" }
+                    p class="muted" { "Choose every framework you want included." }
+                    div class="framework-grid" {
+                        label { input type="checkbox" name="soc2"; "SOC 2" }
+                        label { input type="checkbox" name="nist_csf"; "NIST CSF" }
+                        label { input type="checkbox" name="nist_800_53"; "NIST SP 800-53" }
+                        label { input type="checkbox" name="hipaa"; "HIPAA" }
+                        label { input type="checkbox" name="iso_27001"; "ISO 27001" }
+                        label { input type="checkbox" name="pci_dss"; "PCI DSS" }
+                        label { input type="checkbox" name="fedramp"; "FedRAMP" }
+                    }
+
+                    h2 { "Scope" }
+                    label { "Security program maturity"
+                        select name="security_program_maturity" required {
+                            option value="" { "Choose a stage" }
+                            option value="none" { "Starting from scratch" }
+                            option value="informal" { "Informal practices" }
+                            option value="documented" { "Controls documented" }
+                            option value="managed" { "Managed program" }
+                            option value="audited" { "Previously audited" }
+                        }
+                    }
+                    label { "Target timeline"
+                        select name="target_timeline" required {
+                            option value="" { "Choose a timeline" }
+                            option value="under_3_months" { "Under 3 months" }
+                            option value="3_to_6_months" { "3–6 months" }
+                            option value="6_to_12_months" { "6–12 months" }
+                            option value="over_12_months" { "More than 12 months" }
+                            option value="unsure" { "Still exploring" }
+                        }
+                    }
+                    div class="framework-grid" {
+                        label { input type="checkbox" name="handles_phi"; "Handles protected health information" }
+                        label { input type="checkbox" name="handles_payment_cards"; "Handles payment-card data" }
+                    }
+                    label { "Cloud and hosting providers (comma-separated)"
+                        input name="cloud_providers" maxlength="640" placeholder="AWS, GCP, Azure, Cloudflare";
+                    }
+                    label { "Existing certifications (comma-separated)"
+                        input name="existing_certifications" maxlength="1920" placeholder="ISO 27001, SOC 2 Type II";
+                    }
+                    label { "Anything else we should know"
+                        textarea name="notes" rows="5" maxlength="4000" {}
+                    }
+                    button type="submit" { "Analyze my quote" }
+                    span id="quote-progress" class="muted htmx-indicator" { " Analyzing securely…" }
+                }
+                section id="quote-result" aria-live="polite" {}
+            }
+        },
+        None,
+        None,
+    )
+}
+
+pub fn quote_result(quote: &Value) -> Markup {
+    let id = quote.get("id").and_then(Value::as_str).unwrap_or_default();
+    let status = quote
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("queued");
+
+    if matches!(status, "queued" | "analyzing") {
+        return html! {
+            article id="quote-result" class="card"
+                hx-get={ "/u/quote/" (id) }
+                hx-trigger="every 2s"
+                hx-swap="outerHTML" {
+                h2 { "Building your preliminary quote" }
+                p { "Your answers were saved securely. Canonical's analysis is running now." }
+                p class="muted" { "This page will update automatically." }
+            }
+        };
+    }
+
+    if status == "ready" {
+        let estimate = quote.get("estimate").unwrap_or(&Value::Null);
+        let low = estimate
+            .get("low")
+            .and_then(Value::as_u64)
+            .unwrap_or_default();
+        let high = estimate
+            .get("high")
+            .and_then(Value::as_u64)
+            .unwrap_or_default();
+        let currency = estimate
+            .get("currency")
+            .and_then(Value::as_str)
+            .unwrap_or("USD");
+        let analysis = quote
+            .get("analysisMarkdown")
+            .and_then(Value::as_str)
+            .unwrap_or("Your preliminary quote is ready.");
+
+        return html! {
+            article id="quote-result" class="card" {
+                h2 { "Your preliminary quote" }
+                p class="quote-total" { "$" (low) "–$" (high) " " (currency) }
+                pre style="white-space:pre-wrap;font:inherit" { (analysis) }
+                p class="muted" {
+                    "This estimate is informational and will be confirmed during scoping."
+                }
+            }
+        };
+    }
+
+    html! {
+        article id="quote-result" class="card" {
+            h2 { "We could not finish this quote" }
+            p class="error" role="alert" {
+                "No charge was made. Please review your answers and try again, or contact Canonical."
+            }
+        }
+    }
+}
+
+pub fn quote_error(message: &str) -> Markup {
+    html! {
+        p class="error" role="alert" { (message) }
     }
 }
 

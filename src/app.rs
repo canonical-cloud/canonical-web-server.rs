@@ -27,6 +27,10 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub db: sea_orm::DatabaseConnection,
     pub auth: Arc<dyn AuthProvider>,
+    /// Optional Cloudflare-edge identity verifier. It remains disabled unless
+    /// its shared secret is configured and is retained separately from the
+    /// browser Shared Auth quote flow.
+    pub edge_auth: auth::EdgeAuthVerifier,
     pub login_rate_limiter: auth::LoginRateLimiter,
     pub(crate) login_auth_semaphore: Arc<Semaphore>,
     pub sessions: auth::SessionService,
@@ -50,6 +54,7 @@ impl AppState {
             &config.session_encryption_key,
             config.session_ttl,
         )?;
+        let edge_auth = auth::EdgeAuthVerifier::from_env()?;
         let login_rate_limiter = auth::LoginRateLimiter::new(
             config.login_rate_limit_attempts,
             config.login_rate_limit_global_attempts,
@@ -63,6 +68,7 @@ impl AppState {
             config,
             db,
             auth,
+            edge_auth,
             login_rate_limiter,
             login_auth_semaphore,
             sessions,
@@ -110,11 +116,19 @@ pub fn build_api_app(state: AppState) -> Router {
 
 fn decorate_http(app: Router) -> Router {
     let request_id_header = HeaderName::from_static("x-request-id");
+    // The Cloudflare edge credential is only used by the optional edge
+    // identity extractor. Never allow request logging or diagnostics to emit
+    // it when that boundary is enabled.
+    let edge_secret_header = HeaderName::from_static("x-auth-edge-secret");
     let app =
         telemetry::instrument_http(app).layer(axum::middleware::from_fn(metrics::record_http));
 
     app.layer((
-        SetSensitiveRequestHeadersLayer::new([header::AUTHORIZATION, header::COOKIE]),
+        SetSensitiveRequestHeadersLayer::new([
+            header::AUTHORIZATION,
+            header::COOKIE,
+            edge_secret_header,
+        ]),
         SetRequestIdLayer::new(request_id_header.clone(), MakeRequestUuid),
         PropagateRequestIdLayer::new(request_id_header),
         SetResponseHeaderLayer::if_not_present(

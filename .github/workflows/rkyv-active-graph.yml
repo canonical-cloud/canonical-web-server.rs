@@ -1,0 +1,71 @@
+name: rkyv active dependency graph
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rkyv-active-graph-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  active-graph:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: "1.95.0"
+
+      - name: Reject reachable vulnerable rkyv 0.7 graphs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! grep -q '^name = "rkyv"$' Cargo.lock; then
+            echo 'rkyv is absent from Cargo.lock'
+            exit 0
+          fi
+
+          check_graph() {
+            local label="$1"
+            shift
+            local graph status
+
+            set +e
+            graph="$(cargo tree --workspace "$@" \
+              --invert rkyv@0.7.46 \
+              --edges normal,build,dev 2>&1)"
+            status=$?
+            set -e
+
+            printf '\n===== %s =====\n%s\n' "$label" "$graph"
+            if [ "$status" -ne 0 ]; then
+              echo "cargo tree failed unexpectedly for ${label} with status ${status}" >&2
+              exit "$status"
+            fi
+            if grep -Eq '^rkyv v0\.7\.46([[:space:]]|$)' <<<"$graph"; then
+              echo "rkyv 0.7.46 is reachable in the ${label} dependency graph" >&2
+              exit 1
+            fi
+            if ! grep -Fq 'nothing to print' <<<"$graph" \
+              && ! grep -Fq 'did not match any packages' <<<"$graph"; then
+              echo "could not prove rkyv 0.7.46 is unreachable in ${label}" >&2
+              exit 1
+            fi
+            echo "verified: rkyv 0.7.46 is unreachable in ${label}"
+          }
+
+          check_graph default
+          check_graph all-targets --target all
+          check_graph all-features-all-targets --all-features --target all
