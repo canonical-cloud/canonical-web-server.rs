@@ -1,9 +1,12 @@
 # canonical-web-server.rs
 
-The Rust application server for **[canonical.cloud](https://canonical.cloud)**.
-It is the dynamic half of the product; the sibling
+The Rust application server for **[canonical.plus](https://canonical.plus)**.
+It is the authenticated readiness half of the product; the sibling
 [`canonical-marketing-site.web`](https://github.com/canonical-cloud/canonical-marketing-site.web)
-repository remains the static Astro marketing site.
+repository remains the static Astro marketing site. Canonical Plus helps teams
+prepare systems, controls, remediation plans, and evidence for independent
+review; it does not issue audit opinions, attestations, certifications,
+authorizations, or legal conclusions.
 
 The server uses the sMASH stack:
 
@@ -39,8 +42,9 @@ credentials or the server's Supabase token pair.
   entry point; application modules do not construct pools themselves.
 - `src/telemetry.rs` — JSON stdout logs for Promtail/Loki plus explicit OTLP
   HTTP spans and low-cardinality metrics for the collector/Prometheus.
-- `src/routes/` — probes, Maud/HTMX pages, the signed-in Quote v1 workflow,
-  versioned REST, and authenticated WebSocket upgrade handling. `/u/quote`
+- `src/routes/` — probes, Maud/HTMX pages, the signed-in readiness-scoping
+  workflow, versioned REST, and authenticated WebSocket upgrade handling.
+  `/u/readiness`
   verifies the Cloudflare edge HMAC and uses a distinct, rotated service
   credential only for the internal quote API request.
 - `src/quote_api.rs` — bounded client and Maud views for the separately deployed
@@ -73,8 +77,10 @@ new kind only with matching validation, authorization, schema, and merge rules.
 | `POST` | `/auth/login` | Supabase password login and opaque session creation |
 | `POST` | `/auth/logout` | CSRF-protected local/Supabase logout |
 | `GET` | `/app` | Authenticated Maud application shell |
-| `GET`, `POST` | `/u/quote` | Shared-auth-protected compliance quote workflow |
-| `GET` | `/u/quote/{quote_id}` | Owner-scoped quote status/detail |
+| `GET`, `POST` | `/u/readiness` | Shared-auth-protected readiness scoping workflow |
+| `GET` | `/u/readiness/{quote_id}` | Owner-scoped readiness status/detail |
+| `GET`, `POST` | `/u/quote` | Compatibility alias for existing clients |
+| `GET` | `/u/quote/{quote_id}` | Compatibility detail alias |
 | `GET` | `/app/fragments/session` | HTMX session fragment |
 | `GET` | `/api/v1/{health,info,me}` | Versioned REST metadata/current user |
 | `GET` | `/api/v1/sync/changes` | Incremental authoritative pull |
@@ -85,15 +91,16 @@ new kind only with matching validation, authorization, schema, and merge rules.
 application paths have JSON and HTML 404s respectively rather than falling
 through to the marketing SPA.
 
-The `/u/quote` handlers verify the host-only Shared Auth session at the origin,
+The `/u/readiness` handlers verify the host-only Shared Auth session at the origin,
 then call the dedicated API over its private Kubernetes origin. Browser input
 cannot choose the internal service token, authenticated subject, Canonical
 context record, application Markdown, Gemini key, or Gemini model. The API
 selects the authenticated owner's single active context row.
 
-## Optimistic quote writes
+## Optimistic readiness-scope writes
 
-The quote form remains server-rendered Maud plus HTMX. Before HTMX posts an
+The readiness form remains server-rendered Maud plus HTMX. The versioned wire
+contract retains its established `quote` names for compatibility. Before HTMX posts an
 unsafe request, the browser adapter stores the bounded form fields in the
 account-scoped opto-sync IndexedDB queue and renders that local view. CSRF
 material is never persisted. A client-generated UUID is sent as
