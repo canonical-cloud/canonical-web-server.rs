@@ -4,7 +4,7 @@ Verified **2026-08-06**.
 
 ## Surfaces
 
-- Rust web/BFF and compliance-quote application: `canonical-cloud/canonical-web-server.rs`
+- Rust web/BFF for the customer quote experience: `canonical-cloud/canonical-web-server.rs`
 - Flutter Android/iOS, Flutter Web/mobile web, and Flutter desktop: `canonical-cloud/canonical-agent-flutter` — proposed candidate
 - Rust desktop/local evidence agent: `canonical-cloud/canonical-agent-desktop.rs` — proposed candidate
 - Shared contracts: Canonical interfaces, generated clients, quote/intake/framework/context/evidence schemas, route types, compliance fixtures, and conformance tests
