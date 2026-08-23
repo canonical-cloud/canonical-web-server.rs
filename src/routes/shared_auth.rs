@@ -21,7 +21,7 @@ const LOCAL_STATE_COOKIE: &str = "canonical_auth_state";
 const LOCAL_PKCE_COOKIE: &str = "canonical_auth_pkce";
 const LOCAL_RETURN_COOKIE: &str = "canonical_auth_return";
 const HANDOFF_MAX_AGE_MINUTES: i64 = 10;
-const QUOTE_RETURN_PATH: &str = "/u/quote";
+const QUOTE_RETURN_PATH: &str = "/u/readiness";
 
 #[derive(Deserialize)]
 pub struct StartQuery {
@@ -250,9 +250,9 @@ mod tests {
 
     #[test]
     fn return_path_is_an_exact_allowlist() {
-        assert!(validate_return_path("/u/quote").is_ok());
+        assert!(validate_return_path("/u/readiness").is_ok());
         assert!(validate_return_path("//evil.example").is_err());
-        assert!(validate_return_path("/u/quote?next=https://evil.example").is_err());
+        assert!(validate_return_path("/u/readiness?next=https://evil.example").is_err());
     }
 
     #[test]

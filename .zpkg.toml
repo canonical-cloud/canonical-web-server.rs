@@ -33,6 +33,4 @@ adapter = "none"
 dir = ".vendor/.zed"
 
 [scripts]
-test = "cargo test --workspace --all-targets --locked"
-lint = "cargo clippy --workspace --all-targets --locked -- -D warnings"
-format = "cargo fmt --all -- --check"
+test = "cargo fmt --all -- --check && cargo test --workspace --all-targets --locked && cargo clippy --workspace --all-targets --locked -- -D warnings"

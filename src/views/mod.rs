@@ -17,7 +17,7 @@ fn layout(title: &str, body: Markup, csrf: Option<&str>, account_key: Option<&st
                 @if let Some(account_key) = account_key {
                     meta name="canonical-account-key" content=(account_key);
                 }
-                title { (title) " · canonical.cloud" }
+                title { (title) " · canonical.plus" }
                 style {
                     "body{font-family:ui-sans-serif,system-ui,sans-serif;max-width:72rem;margin:0 auto;padding:2rem;line-height:1.5}nav{display:flex;justify-content:space-between;align-items:center}main{margin-top:3rem}.card{border:1px solid #8886;border-radius:.75rem;padding:1.25rem;margin:1rem 0}label{display:block;margin:.75rem 0}input,textarea,select,button{font:inherit;padding:.65rem}input,textarea,select{box-sizing:border-box;width:100%}button{cursor:pointer}.framework-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:.5rem}.framework-grid label{display:flex;gap:.5rem;align-items:center;margin:0}.framework-grid input{width:auto}.quote-total{font-size:1.5rem;font-weight:700}.muted{opacity:.7}.error{color:#b42318}#sync-status[data-state=offline]{color:#b54708}#sync-status[data-state=synced]{color:#067647}"
                 }
@@ -25,13 +25,13 @@ fn layout(title: &str, body: Markup, csrf: Option<&str>, account_key: Option<&st
             }
             body {
                 nav {
-                    a href="/" { strong { "canonical.cloud" } }
+                    a href="/" { strong { "canonical.plus" } }
                     span {
                         a href="/app" { "Application" }
                         " · "
                         a href="/app/engagements" { "Engagements" }
                         " · "
-                        a href="/u/quote" { "Get a quote" }
+                        a href="/u/readiness" { "Readiness scope" }
                     }
                 }
                 (body)
@@ -123,8 +123,8 @@ pub fn engagements_page(actor: &AuthContext, engagements: &[audit_engagement::Mo
         html! {
             main {
                 header {
-                    h1 { "Compliance engagements" }
-                    p class="muted" { "Engagements are private to your account and enforced by row-level security." }
+                    h1 { "Readiness engagements" }
+                    p class="muted" { "Readiness records are private to your account and enforced by row-level security." }
                 }
                 section class="card" {
                     h2 { "Open an engagement" }
@@ -139,7 +139,7 @@ pub fn engagements_page(actor: &AuthContext, engagements: &[audit_engagement::Mo
                                 }
                             }
                         }
-                        label { "Target report date (optional)" input type="date" name="target_report_date"; }
+                        label { "Target independent-review date (optional)" input type="date" name="target_report_date"; }
                         button type="submit" { "Open engagement" }
                     }
                     div id="engagement-form-error" aria-live="polite" {}
@@ -157,7 +157,7 @@ pub fn engagement_list(engagements: &[audit_engagement::Model]) -> Markup {
         section id="engagement-list" class="card" {
             h2 { "Your engagements" }
             @if engagements.is_empty() {
-                p class="muted" { "No engagements yet. Open one above to start tracking an audit." }
+                p class="muted" { "No engagements yet. Open one above to start tracking readiness." }
             } @else {
                 ul {
                     @for engagement in engagements {
@@ -167,7 +167,7 @@ pub fn engagement_list(engagements: &[audit_engagement::Model]) -> Markup {
                             " · " (status_label(&engagement.status))
                             " · opened " (engagement.opened_at.format("%Y-%m-%d"))
                             @if let Some(target) = engagement.target_report_date {
-                                " · report due " (target)
+                                " · independent review target " (target)
                             }
                         }
                     }
@@ -200,7 +200,7 @@ pub fn engagement_detail_page(
                         (framework_label(&engagement.framework))
                         " · opened " (engagement.opened_at.format("%Y-%m-%d"))
                         @if let Some(target) = engagement.target_report_date {
-                            " · report due " (target)
+                            " · independent review target " (target)
                         }
                     }
                 }
@@ -283,28 +283,28 @@ fn status_label(status: &str) -> &'static str {
     match status {
         "scoping" => "Scoping",
         "remediation" => "Remediation",
-        "in_audit" => "In audit",
-        "complete" => "Complete",
+        "in_audit" => "Independent review",
+        "complete" => "Readiness complete",
         _ => "Unknown status",
     }
 }
 
 pub fn quote_page(email: &str) -> Markup {
     layout(
-        "Get a quote",
+        "Readiness scope",
         html! {
             main {
                 header {
                     p { a href="/" { "← canonical.plus" } }
-                    h1 { "Get a compliance quote in less than 5 minutes" }
+                    h1 { "Scope your readiness plan" }
                     p class="muted" {
                         "Signed in"
                         @if !email.is_empty() { " as " (email) }
-                        ". We use your answers to estimate scope; this is not an audit opinion or certification."
+                        ". We use your answers to prepare a non-binding scope; this is not an audit opinion, attestation, certification, or legal conclusion."
                     }
                 }
-                form class="card" method="post" action="/u/quote"
-                    hx-post="/u/quote" hx-target="#quote-result" hx-swap="innerHTML"
+                form class="card" method="post" action="/u/readiness"
+                    hx-post="/u/readiness" hx-target="#quote-result" hx-swap="innerHTML"
                     hx-indicator="#quote-progress" {
                     h2 { "Company" }
                     label { "Company name" input name="company_name" required maxlength="200"; }
@@ -362,8 +362,8 @@ pub fn quote_page(email: &str) -> Markup {
                     label { "Anything else we should know"
                         textarea name="notes" rows="5" maxlength="4000" {}
                     }
-                    button type="submit" { "Analyze my quote" }
-                    span id="quote-progress" class="muted htmx-indicator" { " Analyzing securely…" }
+                    button type="submit" { "Build my readiness scope" }
+                    span id="quote-progress" class="muted htmx-indicator" { " Preparing securely…" }
                 }
                 section id="quote-result" aria-live="polite" {}
             }
@@ -383,11 +383,11 @@ pub fn quote_result(quote: &Value) -> Markup {
     if matches!(status, "queued" | "analyzing") {
         return html! {
             article id="quote-result" class="card"
-                hx-get={ "/u/quote/" (id) }
+                hx-get={ "/u/readiness/" (id) }
                 hx-trigger="every 2s"
                 hx-swap="outerHTML" {
-                h2 { "Building your preliminary quote" }
-                p { "Your answers were saved securely. Canonical's analysis is running now." }
+                h2 { "Building your preliminary readiness scope" }
+                p { "Your answers were saved securely. Canonical's bounded readiness analysis is running now." }
                 p class="muted" { "This page will update automatically." }
             }
         };
@@ -410,15 +410,15 @@ pub fn quote_result(quote: &Value) -> Markup {
         let analysis = quote
             .get("analysisMarkdown")
             .and_then(Value::as_str)
-            .unwrap_or("Your preliminary quote is ready.");
+            .unwrap_or("Your preliminary readiness scope is ready.");
 
         return html! {
             article id="quote-result" class="card" {
-                h2 { "Your preliminary quote" }
+                h2 { "Your preliminary readiness scope" }
                 p class="quote-total" { "$" (low) "–$" (high) " " (currency) }
                 pre style="white-space:pre-wrap;font:inherit" { (analysis) }
                 p class="muted" {
-                    "This estimate is informational and will be confirmed during scoping."
+                    "This estimate supports readiness planning and is not an audit opinion, attestation, certification, or legal conclusion."
                 }
             }
         };
@@ -426,7 +426,7 @@ pub fn quote_result(quote: &Value) -> Markup {
 
     html! {
         article id="quote-result" class="card" {
-            h2 { "We could not finish this quote" }
+            h2 { "We could not finish this readiness scope" }
             p class="error" role="alert" {
                 "No charge was made. Please review your answers and try again, or contact Canonical."
             }
