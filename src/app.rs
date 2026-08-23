@@ -25,6 +25,10 @@ use crate::{
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
+    /// This connection belongs to the local API/session authority of the selected binary; it is
+    /// not P1 access for a separately trusted web tier. A future physical split defaults domain
+    /// operations to P2. Any P1 read role must satisfy `docs/web-api-data-access.md`, while DDL
+    /// remains isolated to the one-shot migrator.
     pub db: sea_orm::DatabaseConnection,
     pub auth: Arc<dyn AuthProvider>,
     /// Optional Cloudflare-edge identity verifier. It remains disabled unless
