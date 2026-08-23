@@ -34,6 +34,7 @@ axum-extra = { version = "0.12.6", features = ["cookie"] }
 base64 = "0.23.0"
 canonical-auth = { path = "crates/canonical-auth" }
 canonical-config = { path = "crates/canonical-config" }
+canonical-interfaces = { git = "https://github.com/canonical-cloud/canonical-interfaces", rev = "0cab33c2b2a494d2368ef1da0ebe5d614b3a96ef" }
 canonical-session = { path = "crates/canonical-session" }
 canonical-store = { path = "crates/canonical-store" }
 chrono = { version = "0.4.42", features = ["serde"] }
