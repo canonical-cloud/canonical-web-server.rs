@@ -16,6 +16,10 @@ const MAX_RESPONSE_BYTES: usize = 512 * 1024;
 const CANONICAL_CONTEXT_KEY: &str = "quote-analysis";
 const ANSWERS_VERSION: u8 = 1;
 
+/// P2 boundary to the API-owned quote data plane. Keep the hop authenticated, deadline- and
+/// response-bounded, and non-redirecting; mutations reuse a stable idempotency key. Failures never
+/// fall back to the web database or silently switch to P1, P3, or P4. See
+/// `docs/web-api-data-access.md` for the consistency, retry, tracing, and backpressure contract.
 #[derive(Clone)]
 pub struct QuoteApiClient {
     base_url: String,
