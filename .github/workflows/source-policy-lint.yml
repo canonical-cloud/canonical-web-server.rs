@@ -1,4 +1,6 @@
 # Managed by ores-otel source-policy fleet rollout.
+# This repository prohibits outbound reusable workflows. Keep the same
+# immutable central policy implementation wired as ordinary job steps.
 name: Pre-build source policy lint
 
 on:
@@ -43,7 +45,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: ores-otel/.github
-          ref: b5a502d4e69ead9f0e595df54fc267d23a4fe889
+          ref: 1d9aa4fbf1daf6b1aa70c2c2afe3cc591b0dabf7
           path: .source-policy
           persist-credentials: false
 
