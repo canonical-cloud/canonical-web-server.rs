@@ -77,6 +77,9 @@ references, mutual authentication, a two-second maximum connect deadline, a
 ten-second maximum I/O deadline, and a 256 KiB maximum frame. Each frame is a
 four-byte big-endian length followed by exactly that many payload bytes;
 truncated, zero-length, oversized, or trailing-byte frames are rejected.
+Operationally it also keeps a small per-pod connection budget, an authenticated
+handshake, connect and idle deadlines, a heartbeat, bounded inbound and outbound
+buffers, reconnect jitter, and graceful drain.
 Browser WebSockets and PostgreSQL `LISTEN`/`NOTIFY` are different boundaries
 and must not be cited as P3. Overflow fails closed and an operator may require
 an authoritative P2 resync; code never silently falls back to P1.
@@ -84,10 +87,12 @@ an authoritative P2 resync; code never silently falls back to P1.
 ## Path 4: asynchronous NATS or message queue
 
 P4 is an available contract but is not the active quote transport. Its policy
-requires a versioned request envelope, tenant and user subject, stable dedupe
-key, a 64 KiB message limit, durable consumer, explicit ack deadline and retry
-ceiling, distinct request/status subjects, and named database-backed outbox,
-inbox/dedupe, and status records. Status transitions are monotonic:
+requires a versioned request envelope, tenant and user subject, trace context,
+stable dedupe key, a 64 KiB message limit, durable consumer, explicit ack only
+after commit, an explicit ack deadline and retry ceiling, a dead-letter policy,
+distinct request/status subjects, and named database-backed outbox,
+inbox/dedupe, and status records. Queue-age and redelivery metrics are
+required. Status transitions are monotonic:
 `pending -> published -> processing -> succeeded|failed`; a failed operation
 may be republished within the retry budget or moved to `dead_letter`.
 `pg_notify` remains a disposable wake-up and is not P4. The authoritative
