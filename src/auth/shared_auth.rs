@@ -1,9 +1,16 @@
-use std::{env, time::Duration};
+//! Protected Shared Auth introspection for quote-facing routes.
+//!
+//! The independent service credential lives only in the server-side official
+//! client. It is never copied into a browser cookie, request URL, user token,
+//! or product data-plane envelope.
+
+use std::env;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{TimeZone as _, Utc};
-use reqwest::{header, StatusCode, Url};
+use reqwest::Url;
 use sha2::{Digest as _, Sha256};
+use shared_auth_client::{ClientError, Introspection, SharedAuthClient};
 use uuid::Uuid;
 
 use super::{AuthContext, CredentialSource};
@@ -11,22 +18,16 @@ use crate::{config::Config, error::AppError};
 
 const DEFAULT_SECURE_COOKIE: &str = "__Host-canonical-customer-auth";
 const DEFAULT_LOOPBACK_COOKIE: &str = "canonical-customer-auth";
-const VERIFY_PATH: &str = "/shared-auth/auth/verify";
+const DEFAULT_AUDIENCE: &str = "canonical-plus-web";
 const MAX_TOKEN_BYTES: usize = 16 * 1024;
 const MAX_EMAIL_BYTES: usize = 320;
+const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 
-/// Origin-side verifier for first-party Shared Auth access tokens.
-///
-/// The Cloudflare Worker performs the same check before forwarding protected
-/// traffic, but this verifier is deliberately independent: caller-supplied
-/// `x-auth-*` headers are ignored and the origin asks the configured Canonical
-/// Shared Auth realm to verify the raw token again, including session
-/// revocation. The edge is therefore a routing/defence layer, never the sole
-/// authorization authority.
 #[derive(Clone)]
 pub struct SharedAuthVerifier {
-    client: reqwest::Client,
-    verify_url: Url,
+    client: SharedAuthClient,
+    audience: String,
+    expected_issuer: Option<String>,
     cookie_name: String,
     csrf_key: [u8; 32],
 }
@@ -42,34 +43,79 @@ impl SharedAuthVerifier {
             .unwrap_or_else(|_| default_cookie.to_owned());
         validate_cookie_name(&cookie_name, config.cookie_secure)?;
 
-        let default_verify_url = format!(
-            "{}{}",
-            config.app_base_url.trim_end_matches('/'),
-            VERIFY_PATH
-        );
-        let verify_url = env::var("SHARED_AUTH_VERIFY_URL")
-            .unwrap_or(default_verify_url)
-            .parse::<Url>()
-            .map_err(|_| {
-                AppError::BadRequest("SHARED_AUTH_VERIFY_URL must be an absolute URL".into())
-            })?;
-        validate_verify_url(&verify_url)?;
+        let explicit_base = env::var("SHARED_AUTH_BASE").ok();
+        let legacy_base = env::var("SHARED_AUTH_VERIFY_URL")
+            .ok()
+            .map(|value| legacy_verify_url_to_base(&value))
+            .transpose()?;
+        if explicit_base.is_some() && legacy_base.is_some() {
+            return Err(AppError::BadRequest(
+                "configure SHARED_AUTH_BASE, not both Shared Auth URL variables".into(),
+            ));
+        }
+        let configured_base = explicit_base.or(legacy_base);
+        let service_credential = env::var("SHARED_AUTH_INTROSPECT_SECRET").ok();
+        if configured_base.is_some() && service_credential.is_none() {
+            return Err(AppError::BadRequest(
+                "SHARED_AUTH_BASE requires SHARED_AUTH_INTROSPECT_SECRET".into(),
+            ));
+        }
+        if let Some(credential) = service_credential.as_deref() {
+            validate_service_credential(credential)?;
+        }
+
+        let base = configured_base.unwrap_or_else(|| {
+            format!("{}/shared-auth", config.app_base_url.trim_end_matches('/'))
+        });
+        let audience =
+            env::var("SHARED_AUTH_AUDIENCE").unwrap_or_else(|_| DEFAULT_AUDIENCE.to_owned());
+        validate_identifier(&audience, "SHARED_AUTH_AUDIENCE")?;
+        let expected_issuer = env::var("SHARED_AUTH_ISSUER")
+            .ok()
+            .filter(|value| !value.is_empty());
+        if let Some(issuer) = expected_issuer.as_deref() {
+            validate_claim(issuer, "SHARED_AUTH_ISSUER", 256)?;
+        }
 
         let csrf_key: [u8; 32] = config
             .session_encryption_key
             .as_slice()
             .try_into()
             .map_err(|_| AppError::Crypto)?;
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(8))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?;
+        Self::try_new(
+            base,
+            service_credential,
+            audience,
+            expected_issuer,
+            cookie_name,
+            csrf_key,
+        )
+        .map_err(|_| {
+            AppError::BadRequest(
+                "Shared Auth configuration must use a valid HTTPS or internal service base URL"
+                    .into(),
+            )
+        })
+    }
 
+    fn try_new(
+        base: impl Into<String>,
+        service_credential: Option<String>,
+        audience: impl Into<String>,
+        expected_issuer: Option<String>,
+        cookie_name: impl Into<String>,
+        csrf_key: [u8; 32],
+    ) -> Result<Self, ClientError> {
+        let mut client =
+            SharedAuthClient::try_new(base.into())?.with_max_response_bytes(MAX_RESPONSE_BYTES);
+        if let Some(credential) = service_credential {
+            client = client.with_service_credential(credential);
+        }
         Ok(Self {
             client,
-            verify_url,
-            cookie_name,
+            audience: audience.into(),
+            expected_issuer,
+            cookie_name: cookie_name.into(),
             csrf_key,
         })
     }
@@ -78,53 +124,79 @@ impl SharedAuthVerifier {
         &self.cookie_name
     }
 
-    pub async fn authenticate_session(&self, token: &str) -> Result<AuthContext, AppError> {
-        self.authenticate_as(token, CredentialSource::SessionCookie)
+    pub async fn authenticate_session(
+        &self,
+        token: &str,
+        required_scopes: &[&str],
+    ) -> Result<AuthContext, AppError> {
+        self.authenticate_as(token, required_scopes, CredentialSource::SessionCookie)
             .await
     }
 
-    pub async fn authenticate_bearer(&self, token: &str) -> Result<AuthContext, AppError> {
-        self.authenticate_as(token, CredentialSource::Bearer).await
+    pub async fn authenticate_bearer(
+        &self,
+        token: &str,
+        required_scopes: &[&str],
+    ) -> Result<AuthContext, AppError> {
+        self.authenticate_as(token, required_scopes, CredentialSource::Bearer)
+            .await
+    }
+
+    async fn raw_introspect(
+        &self,
+        token: &str,
+        required_scopes: &[&str],
+    ) -> Result<Introspection, ClientError> {
+        self.client
+            .introspect_with_requirements(token, &self.audience, required_scopes)
+            .await
     }
 
     async fn authenticate_as(
         &self,
         token: &str,
+        required_scopes: &[&str],
         source: CredentialSource,
     ) -> Result<AuthContext, AppError> {
         if token.is_empty() || token.len() > MAX_TOKEN_BYTES {
             return Err(AppError::Unauthorized);
         }
-
-        let response = self
-            .client
-            .get(self.verify_url.clone())
-            .header(header::AUTHORIZATION, format!("Bearer {token}"))
-            .header(header::ACCEPT, "application/json")
-            .send()
+        let identity = self
+            .raw_introspect(token, required_scopes)
             .await
-            .map_err(|_| AppError::AuthUpstream)?;
-
-        match response.status() {
-            StatusCode::OK => {}
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => return Err(AppError::Unauthorized),
-            StatusCode::TOO_MANY_REQUESTS => return Err(AppError::AuthBusy),
-            _ => return Err(AppError::AuthUpstream),
-        }
-
-        let headers = response.headers();
-        let user_id = required_header(headers, "x-auth-user-id")?
-            .parse::<Uuid>()
-            .map_err(|_| AppError::Unauthorized)?;
-        let email = required_header(headers, "x-auth-email")?;
-        if email.is_empty() || email.len() > MAX_EMAIL_BYTES || email.chars().any(char::is_control)
+            .map_err(map_client_error)?;
+        if !identity.active
+            || identity.aud.as_deref() != Some(self.audience.as_str())
+            || required_scopes
+                .iter()
+                .any(|required| !identity.has_scope(required))
         {
             return Err(AppError::Unauthorized);
         }
-        // Require cryptographically verified provider provenance even though
-        // the quote service does not currently branch on provider type.
-        let _provider = required_header(headers, "x-auth-provider")?;
-        let _provider_tenant = required_header(headers, "x-auth-provider-tenant")?;
+
+        let issuer = required_claim(identity.iss.as_deref(), 256)?;
+        if self
+            .expected_issuer
+            .as_deref()
+            .is_some_and(|expected| issuer != expected)
+        {
+            return Err(AppError::Unauthorized);
+        }
+        let user_id = required_claim(identity.sub.as_deref(), 128)?
+            .parse::<Uuid>()
+            .map_err(|_| AppError::Unauthorized)?;
+        let email = required_claim(identity.email.as_deref(), MAX_EMAIL_BYTES)?.to_owned();
+        if identity.email_verified != Some(true) {
+            return Err(AppError::Unauthorized);
+        }
+        let _provider = required_claim(identity.provider.as_deref(), 128)?;
+        let _provider_tenant = required_claim(identity.provider_tenant.as_deref(), 256)?;
+        let expires_at = identity
+            .exp
+            .and_then(|value| i64::try_from(value).ok())
+            .and_then(|value| Utc.timestamp_opt(value, 0).single())
+            .filter(|value| *value > Utc::now())
+            .ok_or(AppError::Unauthorized)?;
 
         Ok(AuthContext {
             user_id,
@@ -133,7 +205,7 @@ impl SharedAuthVerifier {
             supabase_session_id: None,
             session_hash: Some(token_fingerprint(token)),
             csrf_token: self.csrf_token_for_source(token, source),
-            expires_at: verified_expiry(token),
+            expires_at,
         })
     }
 
@@ -154,46 +226,94 @@ impl SharedAuthVerifier {
     }
 }
 
-fn required_header(
-    headers: &reqwest::header::HeaderMap,
-    name: &'static str,
-) -> Result<String, AppError> {
-    headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-        .ok_or(AppError::Unauthorized)
+fn map_client_error(error: ClientError) -> AppError {
+    match error {
+        ClientError::Unauthorized | ClientError::InvalidInput(_) => AppError::Unauthorized,
+        ClientError::Status(429) => AppError::AuthBusy,
+        _ => AppError::AuthUpstream,
+    }
 }
 
-fn token_fingerprint(token: &str) -> String {
-    let mut digest = Sha256::new();
-    digest.update(b"canonical-plus/shared-auth-token/v1\0");
-    digest.update(token.as_bytes());
-    URL_SAFE_NO_PAD.encode(digest.finalize())
+fn required_claim(value: Option<&str>, maximum: usize) -> Result<&str, AppError> {
+    let value = value.ok_or(AppError::Unauthorized)?;
+    if value.is_empty()
+        || value.len() > maximum
+        || value.trim() != value
+        || value.chars().any(char::is_control)
+    {
+        return Err(AppError::Unauthorized);
+    }
+    Ok(value)
 }
 
-/// The token has already been verified by Shared Auth before this helper is
-/// called. Decoding here only preserves the verified expiry as local metadata;
-/// authorization never depends on this unverified parsing path.
-fn verified_expiry(token: &str) -> chrono::DateTime<Utc> {
-    let fallback = Utc::now() + chrono::Duration::minutes(5);
-    let Some(payload) = token.split('.').nth(1) else {
-        return fallback;
-    };
-    let Ok(payload) = URL_SAFE_NO_PAD.decode(payload) else {
-        return fallback;
-    };
-    let Ok(claims) = serde_json::from_slice::<serde_json::Value>(&payload) else {
-        return fallback;
-    };
-    claims
-        .get("exp")
-        .and_then(serde_json::Value::as_i64)
-        .and_then(|timestamp| Utc.timestamp_opt(timestamp, 0).single())
-        .filter(|expiry| *expiry > Utc::now())
-        .unwrap_or(fallback)
+fn validate_service_credential(value: &str) -> Result<(), AppError> {
+    if value.trim() != value
+        || value.chars().any(char::is_control)
+        || value
+            .bytes()
+            .filter(|byte| !byte.is_ascii_whitespace())
+            .count()
+            < 32
+        || value.len() > MAX_TOKEN_BYTES
+    {
+        return Err(AppError::BadRequest(
+            "SHARED_AUTH_INTROSPECT_SECRET must contain at least 32 non-whitespace bytes".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_identifier(value: &str, name: &'static str) -> Result<(), AppError> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'/' | b'-')
+        })
+    {
+        return Err(AppError::BadRequest(format!(
+            "{name} must be a bounded portable identifier"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_claim(value: &str, name: &'static str, maximum: usize) -> Result<(), AppError> {
+    if value.is_empty()
+        || value.len() > maximum
+        || value.trim() != value
+        || value.chars().any(char::is_control)
+    {
+        return Err(AppError::BadRequest(format!("{name} is invalid")));
+    }
+    Ok(())
+}
+
+fn legacy_verify_url_to_base(value: &str) -> Result<String, AppError> {
+    let mut url = Url::parse(value).map_err(|_| {
+        AppError::BadRequest("SHARED_AUTH_VERIFY_URL must be an absolute URL".into())
+    })?;
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(AppError::BadRequest(
+            "SHARED_AUTH_VERIFY_URL must not contain credentials, query, or fragment".into(),
+        ));
+    }
+    let path = url.path().trim_end_matches('/');
+    let base_path = path
+        .strip_suffix("/auth/verify")
+        .ok_or_else(|| {
+            AppError::BadRequest("SHARED_AUTH_VERIFY_URL must end in /auth/verify".into())
+        })?
+        .to_owned();
+    url.set_path(if base_path.is_empty() {
+        "/"
+    } else {
+        &base_path
+    });
+    Ok(url.as_str().trim_end_matches('/').to_owned())
 }
 
 fn validate_cookie_name(value: &str, secure: bool) -> Result<(), AppError> {
@@ -211,48 +331,199 @@ fn validate_cookie_name(value: &str, secure: bool) -> Result<(), AppError> {
     Ok(())
 }
 
-fn validate_verify_url(url: &Url) -> Result<(), AppError> {
-    if !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-        || url.host_str().is_none()
-    {
-        return Err(AppError::BadRequest(
-            "SHARED_AUTH_VERIFY_URL must not contain credentials, query, or fragment".into(),
-        ));
-    }
-    let host = url.host_str().unwrap_or_default();
-    let loopback = host.eq_ignore_ascii_case("localhost")
-        || host == "127.0.0.1"
-        || host == "::1"
-        || host.ends_with(".svc")
-        || host.contains(".svc.");
-    if url.scheme() != "https" && !(url.scheme() == "http" && loopback) {
-        return Err(AppError::BadRequest(
-            "SHARED_AUTH_VERIFY_URL requires HTTPS except on loopback or Kubernetes service DNS"
-                .into(),
-        ));
-    }
-    Ok(())
+fn token_fingerprint(token: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"canonical-plus/shared-auth-token/v1\0");
+    digest.update(token.as_bytes());
+    URL_SAFE_NO_PAD.encode(digest.finalize())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        sync::mpsc,
+        thread,
+        time::Duration,
+    };
+
+    use serde_json::{json, Value};
+
     use super::*;
 
-    fn verifier() -> SharedAuthVerifier {
-        SharedAuthVerifier {
-            client: reqwest::Client::new(),
-            verify_url: Url::parse("https://app.canonical.plus/shared-auth/auth/verify").unwrap(),
-            cookie_name: DEFAULT_SECURE_COOKIE.into(),
-            csrf_key: [7; 32],
+    const SERVICE_CREDENTIAL: &str = "independent-web-service-credential-0001";
+    const USER_ID: &str = "11111111-1111-4111-8111-111111111111";
+
+    fn verifier(base: String, credential: Option<&str>) -> SharedAuthVerifier {
+        SharedAuthVerifier::try_new(
+            base,
+            credential.map(str::to_owned),
+            DEFAULT_AUDIENCE,
+            Some("https://auth.canonical.plus".to_owned()),
+            DEFAULT_SECURE_COOKIE,
+            [7; 32],
+        )
+        .unwrap()
+    }
+
+    fn response(audience: &str, scope: &str) -> String {
+        json!({
+            "active": true,
+            "sub": USER_ID,
+            "iss": "https://auth.canonical.plus",
+            "aud": audience,
+            "exp": 4_102_444_800_u64,
+            "provider": "supabase",
+            "provider_tenant": "canonical-plus",
+            "email": "customer@example.com",
+            "email_verified": true,
+            "scope": scope,
+            "futureEnvelopeField": {"safe": true}
+        })
+        .to_string()
+    }
+
+    fn read_request(stream: &mut std::net::TcpStream) -> String {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut bytes = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        loop {
+            let count = stream.read(&mut buffer).unwrap();
+            if count == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&buffer[..count]);
+            let Some(header_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") else {
+                continue;
+            };
+            let headers = String::from_utf8_lossy(&bytes[..header_end]);
+            let content_length = headers.lines().find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().ok())
+                    .flatten()
+            });
+            if content_length.is_none_or(|length| bytes.len() >= header_end + 4 + length) {
+                break;
+            }
         }
+        String::from_utf8(bytes).unwrap()
+    }
+
+    fn spawn_provider(body: String) -> (String, mpsc::Receiver<String>, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            sender.send(read_request(&mut stream)).unwrap();
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+        (format!("http://{address}"), receiver, handle)
+    }
+
+    #[tokio::test]
+    async fn sends_strict_scoped_envelope_with_independent_service_auth() {
+        let (base, requests, handle) =
+            spawn_provider(response(DEFAULT_AUDIENCE, "quotes:read quotes:write"));
+        let verifier = verifier(base, Some(SERVICE_CREDENTIAL));
+
+        let identity = verifier
+            .authenticate_bearer("signed-user-token", &["quotes:read"])
+            .await
+            .unwrap();
+
+        assert_eq!(identity.user_id.to_string(), USER_ID);
+        let request = requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(request.starts_with("POST /auth/introspect HTTP/1.1"));
+        assert!(request.lines().any(|line| line
+            .eq_ignore_ascii_case(&format!("authorization: Bearer {SERVICE_CREDENTIAL}"))));
+        let (_, body) = request.split_once("\r\n\r\n").unwrap();
+        let body: Value = serde_json::from_str(body).unwrap();
+        assert_eq!(
+            body,
+            json!({
+                "contract": "IntrospectionRequest",
+                "payload": {
+                    "token": "signed-user-token",
+                    "audience": DEFAULT_AUDIENCE,
+                    "requiredScopes": ["quotes:read"]
+                }
+            })
+        );
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn omission_is_explicit_and_unknown_response_fields_are_accepted() {
+        let (base, requests, handle) = spawn_provider(response(DEFAULT_AUDIENCE, ""));
+        let verifier = verifier(base, Some(SERVICE_CREDENTIAL));
+
+        verifier
+            .authenticate_bearer("signed-user-token", &[])
+            .await
+            .unwrap();
+
+        let request = requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        let (_, body) = request.split_once("\r\n\r\n").unwrap();
+        let body: Value = serde_json::from_str(body).unwrap();
+        assert_eq!(body["payload"]["requiredScopes"], json!([]));
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn audience_and_scope_mismatches_fail_closed() {
+        let (base, _requests, handle) = spawn_provider(response("another-realm", "quotes:read"));
+        assert!(matches!(
+            verifier(base, Some(SERVICE_CREDENTIAL))
+                .authenticate_bearer("signed-user-token", &["quotes:read"])
+                .await,
+            Err(AppError::Unauthorized)
+        ));
+        handle.join().unwrap();
+
+        let (base, _requests, handle) = spawn_provider(response(DEFAULT_AUDIENCE, "quotes:read"));
+        assert!(matches!(
+            verifier(base, Some(SERVICE_CREDENTIAL))
+                .authenticate_bearer("signed-user-token", &["quotes:write"])
+                .await,
+            Err(AppError::Unauthorized)
+        ));
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn service_auth_precedes_token_constraints_and_duplicates_are_rejected() {
+        let without_service = verifier("http://127.0.0.1:9".to_owned(), None);
+        let error = without_service
+            .raw_introspect("invalid token with spaces", &["duplicate", "duplicate"])
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ClientError::MissingServiceCredential));
+
+        let with_service = verifier("http://127.0.0.1:9".to_owned(), Some(SERVICE_CREDENTIAL));
+        let error = with_service
+            .raw_introspect("signed-user-token", &["quotes:read", "quotes:read"])
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ClientError::InvalidInput("required scopes")
+        ));
     }
 
     #[test]
-    fn csrf_is_stable_and_bound_to_the_verified_cookie() {
-        let verifier = verifier();
+    fn csrf_and_cookie_guards_remain_bound_to_browser_credentials() {
+        let verifier = verifier("https://auth.canonical.plus".to_owned(), None);
         assert_eq!(
             verifier.csrf_token("token-a"),
             verifier.csrf_token("token-a")
@@ -261,42 +532,26 @@ mod tests {
             verifier.csrf_token("token-a"),
             verifier.csrf_token("token-b")
         );
-    }
-
-    #[test]
-    fn csrf_is_only_issued_for_cookie_credentials() {
-        let verifier = verifier();
         assert!(verifier
             .csrf_token_for_source("token-a", CredentialSource::SessionCookie)
             .is_some());
         assert!(verifier
             .csrf_token_for_source("token-a", CredentialSource::Bearer)
             .is_none());
-    }
-
-    #[test]
-    fn secure_cookie_names_must_be_host_only() {
         assert!(validate_cookie_name(DEFAULT_SECURE_COOKIE, true).is_ok());
         assert!(validate_cookie_name("canonical-auth", true).is_err());
-        assert!(validate_cookie_name("canonical-auth", false).is_ok());
     }
 
     #[test]
-    fn verifier_url_rejects_cross_scheme_and_embedded_state() {
-        assert!(validate_verify_url(
-            &Url::parse("https://app.canonical.plus/shared-auth/auth/verify").unwrap()
-        )
-        .is_ok());
-        assert!(validate_verify_url(
-            &Url::parse("http://shared-auth.namespace.svc.cluster.local:8080/auth/verify").unwrap()
-        )
-        .is_ok());
-        assert!(
-            validate_verify_url(&Url::parse("http://example.com/auth/verify").unwrap()).is_err()
+    fn legacy_verify_url_is_only_a_bounded_migration_path() {
+        assert_eq!(
+            legacy_verify_url_to_base("https://app.canonical.plus/shared-auth/auth/verify")
+                .unwrap(),
+            "https://app.canonical.plus/shared-auth"
         );
-        assert!(validate_verify_url(
-            &Url::parse("https://app.canonical.plus/auth/verify?token=secret").unwrap()
-        )
-        .is_err());
+        assert!(
+            legacy_verify_url_to_base("https://app.canonical.plus/auth/verify?token=x").is_err()
+        );
+        assert!(legacy_verify_url_to_base("https://app.canonical.plus/auth/exchange").is_err());
     }
 }
