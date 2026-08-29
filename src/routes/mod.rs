@@ -57,6 +57,7 @@ pub fn router(state: AppState) -> Router {
         ));
     let application = Router::new()
         .route("/healthz", get(health::healthz))
+            .route("/v1/data-plane/capabilities", axum::routing::get(|| async { axum::Json(crate::web_api_plane::capabilities()) }))
         .route("/readyz", get(health::readyz))
         .route("/metrics", get(metrics::endpoint))
         .merge(private_application)
@@ -100,6 +101,7 @@ pub fn api_only_router(state: AppState) -> Router {
         ));
     Router::new()
         .route("/healthz", get(health::healthz))
+            .route("/v1/data-plane/capabilities", axum::routing::get(|| async { axum::Json(crate::web_api_plane::capabilities()) }))
         .route("/readyz", get(health::readyz))
         .route("/metrics", get(metrics::endpoint))
         .merge(private_api)

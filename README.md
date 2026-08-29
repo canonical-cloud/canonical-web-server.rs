@@ -37,8 +37,12 @@ credentials or the server's Supabase token pair.
   listener, PostgreSQL backplane lifecycle, and graceful shutdown.
 - `src/database.rs` — SeaORM connection policy and the explicit migration
   entry point; application modules do not construct pools themselves.
-- `src/telemetry.rs` — JSON stdout logs for Promtail/Loki plus explicit OTLP
-  HTTP spans and low-cardinality metrics for the collector/Prometheus.
+- `src/telemetry.rs` — Ores structured logging pinned to the reviewed
+  `ores.otel.log` revision, bridged into JSON stdout for Promtail/Loki, plus
+  explicit OTLP HTTP spans and low-cardinality collector/Prometheus metrics.
+- `src/data_plane.rs` — the strict shared contract and fail-closed policies for
+  direct read-only DB, bounded stateless HTTP, framed TLS 1.3 mTLS/TCP, and
+  durable NATS JetStream web-to-API modes.
 - `src/routes/` — probes, Maud/HTMX pages, the signed-in Quote v1 workflow,
   versioned REST, and authenticated WebSocket upgrade handling. `/u/quote`
   verifies the Cloudflare edge HMAC and uses a distinct, rotated service
@@ -85,11 +89,41 @@ new kind only with matching validation, authorization, schema, and merge rules.
 application paths have JSON and HTML 404s respectively rather than falling
 through to the marketing SPA.
 
-The `/u/quote` handlers verify the host-only Shared Auth session at the origin,
-then call the dedicated API over its private Kubernetes origin. Browser input
+The `/u/quote` handlers use the official Shared Auth Rust client pinned at
+`cc57a85b276bee81ad94decc87df2f48d49cab9f` to send the strict
+`IntrospectionRequest` envelope. The independent
+`SHARED_AUTH_INTROSPECT_SECRET` is authenticated before the inspected token is
+parsed; `GET`/`HEAD` require `quotes:read`, unsafe methods require
+`quotes:write`, and the exact `canonical-plus-web` audience, issuer, expiry,
+verified email, provider, and provider tenant are checked at the origin. The
+handler then calls the dedicated API over its private Kubernetes origin. Browser input
 cannot choose the internal service token, authenticated subject, Canonical
 context record, application Markdown, Gemini key, or Gemini model. The API
 selects the authenticated owner's single active context row.
+
+## Web/API data paths
+
+Web and API share the versioned `canonical-cloud/web-api/v1` request contract
+and exact `canonical-plus-api` audience. Four modes are represented explicitly;
+there is no automatic fallback between them:
+
+1. Direct DB is read-only and requires the exact
+   `canonical_cloud__quote__web_ro` role, read-only transactions, forced RLS,
+   curated queries, short statement/lock timeouts, and bounded rows.
+2. Stateless HTTP is the active quote path. It uses a distinct server-only
+   credential and verified user subject, a 64 KiB request limit, streamed
+   256 KiB response limit, two-second connect timeout, ten-second total
+   timeout, no redirects, and stable mutation idempotency keys.
+3. Stateful TCP requires TLS 1.3 mutual authentication and an exact four-byte
+   big-endian frame length with bounded connect/I/O deadlines and payloads.
+4. NATS JetStream requires distinct request/status subjects, a durable
+   consumer, stable dedupe keys, bounded deliveries, and persisted
+   outbox/inbox/status state with monotonic transitions.
+
+Only stateless HTTP is active for quote operations today. Enabling another
+mode requires its separately scoped deployment credentials and reviewed
+infrastructure; declaring support never broadens the current web database role.
+See [`docs/web-api-data-access.md`](docs/web-api-data-access.md).
 
 ## Optimistic quote writes
 
@@ -284,6 +318,7 @@ placeholder. `APP_SESSION_ENCRYPTION_KEY` must be standard-base64 for exactly
 
 ```sh
 direnv allow                       # or: nix develop ./.nix / ./shell
+zed install --adapter none
 npm ci --prefix client
 npm run build --prefix client
 cargo run -- migrate               # local/fresh database only
@@ -306,8 +341,9 @@ use Supabase Postgres with TLS.
 
 ## Observability
 
-The server always writes compact JSON logs to stdout, which Kubernetes exposes
-as CRI logs for Promtail and Loki. Set `RUST_LOG` to tune filtering; credentials,
+The server initializes the pinned Ores logger and bridges its structured
+records into the same compact JSON stdout stream that Kubernetes exposes as CRI
+logs for Promtail and Loki. Set `RUST_LOG` to tune filtering; credentials,
 cookies, bearer tokens, request bodies, and database URLs are never span fields.
 
 Set `OTEL_EXPORTER_OTLP_ENDPOINT` to an OTLP/gRPC collector endpoint (port 4317
@@ -368,9 +404,9 @@ User-visible, quote, intake, framework, context, evidence, authentication,
 notification, permission, navigation, or deep-link changes in this Rust web/BFF
 must be evaluated for:
 
-- `canonical-cloud/canonical-agent-flutter` on Android, iOS, Flutter Web/mobile
-  web, and Flutter desktop when that proposed client is activated;
-- `canonical-cloud/canonical-agent-desktop.rs`, the proposed Rust desktop/local
+- `canonical-cloud/canonical-flutter` on Android, iOS, Flutter Web/mobile web,
+  and Flutter desktop when that proposed client is activated;
+- `canonical-cloud/canonical-desktop-app.rs`, the Rust desktop/local
   evidence agent; and
 - Canonical interfaces, generated clients, quote/intake/framework/context/
   evidence schemas, route types, compliance fixtures, and conformance tests.
