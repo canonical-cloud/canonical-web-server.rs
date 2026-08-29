@@ -309,7 +309,7 @@ impl QuoteForm {
             contact_name,
             contact_email,
             website,
-            employee_count: self.employee_count,
+            employee_count: i64::from(self.employee_count),
             annual_revenue_band,
             frameworks,
             current_stage,
@@ -322,8 +322,8 @@ impl QuoteForm {
             has_incident_response_plan: self.has_incident_response_plan.is_some(),
             has_vendor_management: self.has_vendor_management.is_some(),
             notes,
-            context_key: QuoteRequest::fixed_context_key().into(),
-            answers_version: QuoteRequest::answers_version(),
+            context_key: Some("quote-analysis".into()),
+            answers_version: 1,
         })
     }
 }
@@ -502,7 +502,7 @@ mod tests {
     #[test]
     fn browser_form_cannot_select_a_database_context() {
         let request = fixture_form().into_request("security@example.com").unwrap();
-        assert_eq!(request.context_key, "quote-analysis");
+        assert_eq!(request.context_key.as_deref(), Some("quote-analysis"));
         let value = serde_json::to_value(request).unwrap();
         assert!(value.get("contextRecordId").is_none());
         assert!(value.get("markdownContext").is_none());

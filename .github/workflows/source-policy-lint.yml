@@ -1,0 +1,88 @@
+# Managed by ores-otel source-policy fleet rollout.
+# This repository prohibits outbound reusable workflows. Keep the same
+# immutable central policy implementation wired as ordinary job steps.
+name: Pre-build source policy lint
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-policy:
+    name: ESLint and Rust source policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Detect tracked source languages
+        id: languages
+        shell: bash
+        run: |
+          ecma_files=$(git ls-files -- '*.cjs' '*.mjs' '*.js' '*.jsx' '*.ts' '*.tsx')
+          rust_files=$(git ls-files -- '*.rs')
+          if [[ -n "$ecma_files" ]]; then
+            echo 'ecmascript=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ecmascript=false' >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -n "$rust_files" ]]; then
+            echo 'rust=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'rust=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out immutable policy implementation
+        if: steps.languages.outputs.ecmascript == 'true' || steps.languages.outputs.rust == 'true'
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: ores-otel/.github
+          ref: ed4a422095cbee47e115201d111a5dfbc17b5e89
+          path: .source-policy
+          persist-credentials: false
+
+      - name: Set up Node.js
+        if: steps.languages.outputs.ecmascript == 'true'
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: .source-policy/tools/ecmascript-lint/package-lock.json
+
+      - name: Install pinned ESLint policy dependencies
+        if: steps.languages.outputs.ecmascript == 'true'
+        shell: bash
+        run: npm ci --ignore-scripts --prefix .source-policy/tools/ecmascript-lint
+
+      - name: Lint ECMAScript semicolon policy
+        if: steps.languages.outputs.ecmascript == 'true'
+        shell: bash
+        run: node .source-policy/tools/ecmascript-lint/lint.mjs "$GITHUB_WORKSPACE"
+
+      - name: Set up stable Rust
+        if: steps.languages.outputs.rust == 'true'
+        shell: bash
+        run: rustup toolchain install 1.88.0 --profile minimal --no-self-update
+
+      - name: Lint Rust explicit-return policy
+        if: steps.languages.outputs.rust == 'true'
+        shell: bash
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/ores-fleet-rust-target
+        run: >-
+          cargo +1.88.0 run --locked --quiet --release
+          --manifest-path .source-policy/tools/rust-explicit-return/Cargo.toml
+          -- "$GITHUB_WORKSPACE"
+
+      - name: Report repositories without applicable source
+        if: steps.languages.outputs.ecmascript != 'true' && steps.languages.outputs.rust != 'true'
+        shell: bash
+        run: echo 'No tracked ECMAScript or Rust source files were found.'

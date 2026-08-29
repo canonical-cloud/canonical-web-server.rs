@@ -3,19 +3,26 @@
 use std::{env, sync::Arc, time::Duration};
 
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use canonical_interfaces::{
+    QuoteDetail, QuoteDetailStatus, QuoteListResponse, QuoteSubmissionResponse,
+    QuoteSubmissionResponseStatus, QuoteSummary, QuoteSummaryStatus,
+};
 use futures_util::StreamExt;
 use maud::{html, Markup, DOCTYPE};
 use reqwest::{Client, Response, Url};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::Value as JsonValue;
+use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
 use crate::{auth::AuthContext, error::AppError};
 
-const MAX_RESPONSE_BYTES: usize = 512 * 1024;
-const CANONICAL_CONTEXT_KEY: &str = "quote-analysis";
-const ANSWERS_VERSION: u8 = 1;
+pub use canonical_interfaces::QuoteRequest;
 
+const MAX_RESPONSE_BYTES: usize = 512 * 1024;
+
+/// P2 boundary to the API-owned quote data plane. Keep the hop authenticated, deadline- and
+/// response-bounded, and non-redirecting; mutations reuse a stable idempotency key. Failures never
+/// fall back to the web database or silently switch to P1, P3, or P4. See
+/// `docs/web-api-data-access.md` for the consistency, retry, tracing, and backpressure contract.
 #[derive(Clone)]
 pub struct QuoteApiClient {
     base_url: String,
@@ -87,15 +94,24 @@ impl QuoteApiClient {
             .json(request)
             .send()
             .await?;
-        let submission: ApiQuoteSubmissionResponse = decode(response, StatusCode::ACCEPTED).await?;
-        let expected_stream = format!("/api/v1/quotes/{}/events", submission.quote_id);
-        if submission.status != "queued"
-            || submission.stream_url != expected_stream
-            || submission.created_at.is_empty()
+        let accepted: QuoteSubmissionResponse = decode(response, StatusCode::ACCEPTED).await?;
+        let accepted_id =
+            Uuid::parse_str(&accepted.quote_id).map_err(|_| AppError::ServiceUpstream)?;
+        let expected_stream = format!("/api/v1/quotes/{accepted_id}/events");
+        if accepted_id != idempotency_key
+            || accepted.stream_url != expected_stream
+            || accepted.created_at.is_empty()
+            || !matches!(
+                accepted.status,
+                QuoteSubmissionResponseStatus::Queued
+                    | QuoteSubmissionResponseStatus::Analyzing
+                    | QuoteSubmissionResponseStatus::Ready
+                    | QuoteSubmissionResponseStatus::Failed
+            )
         {
             return Err(AppError::ServiceUpstream);
         }
-        Ok(QuoteResponse::from_submission(request, submission))
+        self.get(actor, accepted_id).await
     }
 
     pub async fn get(
@@ -109,8 +125,8 @@ impl QuoteApiClient {
             .headers(self.headers(actor)?)
             .send()
             .await?;
-        let record: ApiQuoteRecord = decode(response, StatusCode::OK).await?;
-        Ok(record.into())
+        let detail: QuoteDetail = decode(response, StatusCode::OK).await?;
+        quote_from_detail(detail)
     }
 
     pub async fn list(&self, actor: &AuthContext) -> Result<Vec<QuoteResponse>, AppError> {
@@ -120,8 +136,8 @@ impl QuoteApiClient {
             .headers(self.headers(actor)?)
             .send()
             .await?;
-        let records: Vec<ApiQuoteRecord> = decode(response, StatusCode::OK).await?;
-        Ok(records.into_iter().map(QuoteResponse::from).collect())
+        let page: QuoteListResponse = decode(response, StatusCode::OK).await?;
+        page.quotes.into_iter().map(quote_from_summary).collect()
     }
 
     fn headers(&self, actor: &AuthContext) -> Result<HeaderMap, AppError> {
@@ -148,7 +164,7 @@ async fn decode<T: DeserializeOwned>(
     }
     if matches!(
         status,
-        StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY
+        StatusCode::BAD_REQUEST | StatusCode::CONFLICT | StatusCode::UNPROCESSABLE_ENTITY
     ) {
         return Err(AppError::BadRequest(
             "review the quote fields and try again".into(),
@@ -171,63 +187,6 @@ async fn decode<T: DeserializeOwned>(
     serde_json::from_slice(&bytes).map_err(AppError::from)
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct QuoteRequest {
-    pub organization_name: String,
-    pub contact_name: String,
-    pub contact_email: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub website: Option<String>,
-    pub employee_count: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub annual_revenue_band: Option<String>,
-    pub frameworks: Vec<String>,
-    pub current_stage: String,
-    pub infrastructure: Vec<String>,
-    pub data_sensitivity: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target_date: Option<String>,
-    pub has_security_program: bool,
-    pub has_policies: bool,
-    pub has_risk_assessment: bool,
-    pub has_incident_response_plan: bool,
-    pub has_vendor_management: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notes: Option<String>,
-    pub context_key: String,
-    pub answers_version: u8,
-}
-
-impl QuoteRequest {
-    pub fn fixed_context_key() -> &'static str {
-        CANONICAL_CONTEXT_KEY
-    }
-
-    pub const fn answers_version() -> u8 {
-        ANSWERS_VERSION
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ApiQuoteSubmissionResponse {
-    quote_id: Uuid,
-    status: String,
-    stream_url: String,
-    created_at: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ApiQuoteRecord {
-    analysis: Option<JsonValue>,
-    error_code: Option<String>,
-    frameworks: Vec<String>,
-    organization_name: String,
-    quote_id: Uuid,
-    status: String,
-}
-
 #[derive(Clone, Debug)]
 pub struct QuoteResponse {
     pub id: Uuid,
@@ -239,52 +198,70 @@ pub struct QuoteResponse {
     pub error_code: Option<String>,
 }
 
-impl QuoteResponse {
-    fn from_submission(request: &QuoteRequest, submission: ApiQuoteSubmissionResponse) -> Self {
-        Self {
-            id: submission.quote_id,
-            status: submission.status,
-            company_name: request.organization_name.clone(),
-            frameworks: request.frameworks.clone(),
-            estimate: None,
-            analysis_summary: None,
-            error_code: None,
-        }
-    }
-}
-
-impl From<ApiQuoteRecord> for QuoteResponse {
-    fn from(record: ApiQuoteRecord) -> Self {
-        let estimate = record.analysis.as_ref().and_then(|analysis| {
-            Some(QuoteEstimate {
-                low: analysis.get("estimated_total_fee_low")?.as_u64()?,
-                high: analysis.get("estimated_total_fee_high")?.as_u64()?,
-                currency: analysis.get("currency")?.as_str()?.to_owned(),
-            })
-        });
-        let analysis_summary = record
-            .analysis
-            .as_ref()
-            .and_then(|analysis| analysis.get("summary"))
-            .and_then(JsonValue::as_str)
-            .map(str::to_owned);
-        Self {
-            id: record.quote_id,
-            status: record.status,
-            company_name: record.organization_name,
-            frameworks: record.frameworks,
-            estimate,
-            analysis_summary,
-            error_code: record.error_code,
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct QuoteEstimate {
     pub low: u64,
     pub high: u64,
     pub currency: String,
+}
+
+fn quote_from_detail(detail: QuoteDetail) -> Result<QuoteResponse, AppError> {
+    let analysis_summary = detail
+        .estimate
+        .as_ref()
+        .map(|estimate| estimate.summary.clone());
+    let error_code = detail.problem.as_ref().map(|problem| problem.code.clone());
+    Ok(QuoteResponse {
+        id: Uuid::parse_str(&detail.quote_id).map_err(|_| AppError::ServiceUpstream)?,
+        status: detail_status(detail.status).into(),
+        company_name: detail.request.organization_name,
+        frameworks: detail.request.frameworks,
+        estimate: detail.estimate.as_ref().map(quote_estimate),
+        analysis_summary,
+        error_code,
+    })
+}
+
+fn quote_from_summary(summary: QuoteSummary) -> Result<QuoteResponse, AppError> {
+    let analysis_summary = summary
+        .estimate
+        .as_ref()
+        .map(|estimate| estimate.summary.clone());
+    Ok(QuoteResponse {
+        id: Uuid::parse_str(&summary.quote_id).map_err(|_| AppError::ServiceUpstream)?,
+        status: summary_status(summary.status).into(),
+        company_name: summary.organization_name,
+        frameworks: summary.frameworks,
+        estimate: summary.estimate.as_ref().map(quote_estimate),
+        analysis_summary,
+        error_code: None,
+    })
+}
+
+fn quote_estimate(estimate: &canonical_interfaces::QuoteEstimate) -> QuoteEstimate {
+    QuoteEstimate {
+        low: u64::try_from(estimate.lower_bound_cents.max(0)).unwrap_or_default() / 100,
+        high: u64::try_from(estimate.upper_bound_cents.max(0)).unwrap_or_default() / 100,
+        currency: estimate.currency.clone(),
+    }
+}
+
+const fn detail_status(status: QuoteDetailStatus) -> &'static str {
+    match status {
+        QuoteDetailStatus::Queued => "queued",
+        QuoteDetailStatus::Analyzing => "analyzing",
+        QuoteDetailStatus::Ready => "ready",
+        QuoteDetailStatus::Failed => "failed",
+    }
+}
+
+const fn summary_status(status: QuoteSummaryStatus) -> &'static str {
+    match status {
+        QuoteSummaryStatus::Queued => "queued",
+        QuoteSummaryStatus::Analyzing => "analyzing",
+        QuoteSummaryStatus::Ready => "ready",
+        QuoteSummaryStatus::Failed => "failed",
+    }
 }
 
 pub fn quote_page(actor: &AuthContext, quotes: &[QuoteResponse]) -> Markup {
@@ -457,7 +434,7 @@ pub fn quote_status_fragment(quote: &QuoteResponse) -> Markup {
             }
         };
     }
-    if matches!(quote.status.as_str(), "completed" | "ready") {
+    if quote.status == "ready" {
         return html! {
             article id={ "quote-" (quote.id) } class="card" {
                 h2 { (quote.company_name) }
@@ -499,58 +476,54 @@ mod tests {
     #[test]
     fn canonical_fixture_serializes_without_transport_drift() {
         let request = fixture_request();
-        let expected: JsonValue =
+        let expected: serde_json::Value =
             serde_json::from_str(include_str!("../fixtures/quote/v1/request.json")).unwrap();
         assert_eq!(serde_json::to_value(&request).unwrap(), expected);
-        assert_eq!(request.context_key, CANONICAL_CONTEXT_KEY);
-        assert_eq!(request.answers_version, ANSWERS_VERSION);
+        assert_eq!(request.context_key.as_deref(), Some("quote-analysis"));
+        assert_eq!(request.answers_version, 1);
         assert!(expected.get("contextRecordId").is_none());
         assert!(expected.get("markdown_context").is_none());
         assert!(expected.get("userId").is_none());
     }
 
     #[test]
-    fn maps_the_canonical_submission_fixture() {
-        let submission: ApiQuoteSubmissionResponse = serde_json::from_str(include_str!(
+    fn parses_the_canonical_submission_fixture() {
+        let submission: QuoteSubmissionResponse = serde_json::from_str(include_str!(
             "../fixtures/quote/v1/submission-response.json"
         ))
         .unwrap();
-        let request = fixture_request();
-        let quote = QuoteResponse::from_submission(&request, submission);
+        assert_eq!(submission.quote_id, "11111111-1111-4111-8111-111111111111");
+        assert_eq!(submission.status, QuoteSubmissionResponseStatus::Queued);
         assert_eq!(
-            quote.id,
-            Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap()
+            submission.stream_url,
+            "/api/v1/quotes/11111111-1111-4111-8111-111111111111/events"
         );
-        assert_eq!(quote.status, "queued");
-        assert_eq!(quote.company_name, "Example Company");
-        assert!(quote.frameworks.contains(&"nist_800_53".to_owned()));
     }
 
     #[test]
-    fn maps_the_durable_api_record() {
+    fn maps_the_canonical_detail_contract() {
+        let request: serde_json::Value =
+            serde_json::from_str(include_str!("../fixtures/quote/v1/request.json")).unwrap();
+        let estimate: serde_json::Value =
+            serde_json::from_str(include_str!("../fixtures/quote/v1/estimate.json")).unwrap();
         let value = serde_json::json!({
-            "analysis": {
-                "summary": "A phased readiness engagement.",
-                "currency": "USD",
-                "estimated_total_fee_low": 12000,
-                "estimated_total_fee_high": 18000
-            },
-            "context_record_id": Uuid::nil(),
-            "error_code": null,
-            "frameworks": ["soc2_type_2"],
-            "gemini_model": "gemini-3.6-flash",
-            "organization_name": "Example",
-            "persistence": "postgres",
-            "quote_id": Uuid::nil(),
-            "status": "completed"
+            "quoteId": "11111111-1111-4111-8111-111111111111",
+            "status": "ready",
+            "request": request,
+            "eventsUrl": "/api/v1/quotes/11111111-1111-4111-8111-111111111111/events",
+            "createdAt": "2026-08-06T05:00:00Z",
+            "updatedAt": "2026-08-06T05:02:00Z",
+            "estimate": estimate,
+            "problem": null
         });
-        let record: ApiQuoteRecord = serde_json::from_value(value).unwrap();
-        let quote = QuoteResponse::from(record);
-        assert_eq!(quote.company_name, "Example");
-        assert_eq!(quote.estimate.as_ref().unwrap().low, 12_000);
+        let detail: QuoteDetail = serde_json::from_value(value).unwrap();
+        let quote = quote_from_detail(detail).unwrap();
+        assert_eq!(quote.company_name, "Example Company");
+        assert_eq!(quote.estimate.as_ref().unwrap().low, 25_000);
         assert_eq!(
             quote.analysis_summary.as_deref(),
-            Some("A phased readiness engagement.")
+            Some("Preliminary planning range for a multi-framework readiness engagement.")
         );
+        assert!(quote.error_code.is_none());
     }
 }
