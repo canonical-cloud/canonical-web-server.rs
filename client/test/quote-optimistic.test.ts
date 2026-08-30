@@ -1,5 +1,11 @@
 import { createOptoSyncClient, OptoSyncClient } from "@opto-sync/client/browser";
-import { describe, expect, it } from "vitest";
+import { Subject } from "rxjs";
+import { describe, expect, it, vi } from "vitest";
+import {
+  INITIAL_QUOTE_DELIVERY_SCHEDULE,
+  QuoteDeliveryScheduler,
+  reduceQuoteDeliverySchedule,
+} from "../src/quote-delivery-scheduler";
 import {
   QuoteWriteQueue,
   quoteFieldsFromPayload,
@@ -47,5 +53,72 @@ describe("opto-backed quote writes", () => {
     await reopened.markSynced(rowId);
     expect(await reopened.pending()).toHaveLength(0);
     await reopened.clearLocalData();
+  });
+});
+
+describe("quote delivery scheduler", () => {
+  it("models an explicit immutable trailing-flush transition", () => {
+    const firstRun = reduceQuoteDeliverySchedule(
+      INITIAL_QUOTE_DELIVERY_SCHEDULE,
+      { type: "trigger" },
+    );
+    const pendingWake = reduceQuoteDeliverySchedule(firstRun, { type: "trigger" });
+    const trailingRun = reduceQuoteDeliverySchedule(pendingWake, { type: "settled" });
+    const settled = reduceQuoteDeliverySchedule(trailingRun, { type: "settled" });
+
+    expect(firstRun).toEqual({ phase: "flushing", flushRequested: false, run: 1 });
+    expect(pendingWake).toEqual({ phase: "flushing", flushRequested: true, run: 1 });
+    expect(trailingRun).toEqual({ phase: "flushing", flushRequested: false, run: 2 });
+    expect(settled).toEqual({ phase: "idle", flushRequested: false, run: 2 });
+    expect(INITIAL_QUOTE_DELIVERY_SCHEDULE).toEqual({
+      phase: "idle",
+      flushRequested: false,
+      run: 0,
+    });
+  });
+
+  it("coalesces wakes into one serial trailing flush", async () => {
+    const wakeSignals = new Subject<void>();
+    let resolveFirstFlush: (() => void) | undefined;
+    const firstFlush = new Promise<void>((resolve) => {
+      resolveFirstFlush = resolve;
+    });
+    let attempts = 0;
+    const flush = vi.fn(() => {
+      attempts += 1;
+      return attempts === 1 ? firstFlush : Promise.resolve();
+    });
+    const scheduler = new QuoteDeliveryScheduler({
+      flush,
+      onFlushError: vi.fn(),
+    });
+    scheduler.start(wakeSignals);
+
+    wakeSignals.next();
+    await vi.waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
+    wakeSignals.next();
+    wakeSignals.next();
+    expect(flush).toHaveBeenCalledTimes(1);
+
+    resolveFirstFlush?.();
+    await vi.waitFor(() => expect(flush).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(flush).toHaveBeenCalledTimes(2);
+    scheduler.stop();
+  });
+
+  it("contains flush errors at the effect boundary", async () => {
+    const wakeSignals = new Subject<void>();
+    const failure = new Error("offline");
+    const onFlushError = vi.fn();
+    const scheduler = new QuoteDeliveryScheduler({
+      flush: async () => Promise.reject(failure),
+      onFlushError,
+    });
+    scheduler.start(wakeSignals);
+
+    wakeSignals.next();
+    await vi.waitFor(() => expect(onFlushError).toHaveBeenCalledWith(failure));
+    scheduler.stop();
   });
 });
