@@ -638,7 +638,10 @@ mod tests {
     async fn expired_session_responses_never_echo_customer_content() {
         for htmx in [false, true] {
             let mut headers = HeaderMap::new();
-            headers.insert(header::COOKIE, HeaderValue::from_static("session=synthetic"));
+            headers.insert(
+                header::COOKIE,
+                HeaderValue::from_static("session=synthetic"),
+            );
             if htmx {
                 headers.insert("hx-request", HeaderValue::from_static("true"));
             }
