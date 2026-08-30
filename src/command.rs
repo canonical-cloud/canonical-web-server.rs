@@ -2,11 +2,10 @@
 
 use crate::{
     config::{Config, MigrationConfig},
-    database, env_compat, server,
+    database, server,
 };
 
 pub async fn run(command: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
-    env_compat::install_internal_auth_token_alias();
     match command {
         Some("migrate") => {
             let config = MigrationConfig::from_env()?;

@@ -1,16 +1,31 @@
 use canonical_auth::SupabaseAuth;
+use canonical_config::flags::{self, Contract};
 use canonical_config::SessionRevokerConfig;
 use canonical_session::SessionRevoker;
 use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let raw_command = std::env::args().nth(1);
+    let command = raw_command
+        .as_deref()
+        .filter(|value| matches!(*value, "run" | "check"));
+    if let Some(output) = flags::process_control(
+        Contract::SessionRevoker,
+        "canonical-session-revoker",
+        env!("CARGO_PKG_VERSION"),
+        command,
+    )
+    .map_err(std::io::Error::other)?
+    {
+        print!("{output}");
+        return Ok(());
+    }
     tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                "canonical_web_server=info,canonical_session_revoker=info".into()
-            }),
-        )
+        .with_env_filter(flags::var("RUST_LOG").ok().map_or_else(
+            || "canonical_web_server=info,canonical_session_revoker=info".into(),
+            tracing_subscriber::EnvFilter::new,
+        ))
         .init();
 
     let config = SessionRevokerConfig::from_env()?;
@@ -24,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let revoker = SessionRevoker::new(db.clone(), auth, &config.session_encryption_key)?;
     revoker.verify_database_role().await?;
 
-    match std::env::args().nth(1).as_deref() {
+    match command {
         None | Some("run") => {
             let worker = revoker.spawn();
             tracing::info!(

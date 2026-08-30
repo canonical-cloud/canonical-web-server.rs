@@ -2,8 +2,10 @@ use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE, URL_SAFE_NO_PAD},
     Engine as _,
 };
-use std::{collections::HashSet, env, path::PathBuf, time::Duration};
+use std::{collections::HashSet, path::PathBuf, time::Duration};
 use thiserror::Error;
+
+pub mod flags;
 
 #[derive(Clone)]
 pub struct Config {
@@ -120,7 +122,7 @@ impl Config {
         } else {
             "canonical_session"
         };
-        let origins = env::var("APP_ALLOWED_ORIGINS").unwrap_or_else(|_| app_base_url.clone());
+        let origins = flags::var("APP_ALLOWED_ORIGINS").unwrap_or_else(|_| app_base_url.clone());
         let allowed_origins = origins
             .split(',')
             .map(str::trim)
@@ -160,7 +162,7 @@ impl Config {
         let session_ttl = session_ttl_from_days(session_ttl_days)?;
 
         let session_cookie =
-            env::var("APP_SESSION_COOKIE").unwrap_or_else(|_| default_cookie.to_owned());
+            flags::var("APP_SESSION_COOKIE").unwrap_or_else(|_| default_cookie.to_owned());
         if session_cookie.starts_with("__Host-") && !cookie_secure {
             return Err(ConfigError::Invalid {
                 name: "APP_SESSION_COOKIE",
@@ -232,12 +234,12 @@ impl Config {
 
         Ok(Self {
             port: optional_parse("PORT", 8081)?,
-            static_dir: env::var_os("STATIC_DIR")
+            static_dir: flags::var("STATIC_DIR")
                 .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("static")),
-            app_asset_dir: env::var_os("APP_ASSET_DIR")
+                .unwrap_or_else(|_| PathBuf::from("static")),
+            app_asset_dir: flags::var("APP_ASSET_DIR")
                 .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("client/dist")),
+                .unwrap_or_else(|_| PathBuf::from("client/dist")),
             database_url: required("DATABASE_URL")?,
             database_max_connections,
             app_base_url,
@@ -487,7 +489,7 @@ fn validated_supabase_publishable_key(value: String) -> Result<String, ConfigErr
 }
 
 fn required(name: &'static str) -> Result<String, ConfigError> {
-    env::var(name)
+    flags::var(name)
         .map_err(|_| ConfigError::Missing(name))
         .and_then(|value| {
             if value.trim().is_empty() {
@@ -503,7 +505,7 @@ where
     T: std::str::FromStr,
     T::Err: std::fmt::Display,
 {
-    match env::var(name) {
+    match flags::var(name) {
         Ok(value) => value.parse().map_err(|error: T::Err| ConfigError::Invalid {
             name,
             message: error.to_string(),
@@ -513,7 +515,7 @@ where
 }
 
 fn optional_bool(name: &'static str, default: bool) -> Result<bool, ConfigError> {
-    match env::var(name) {
+    match flags::var(name) {
         Ok(value) => match value.to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" => Ok(true),
             "0" | "false" | "no" => Ok(false),
