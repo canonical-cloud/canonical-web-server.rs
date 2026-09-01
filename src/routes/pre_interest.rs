@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use axum::{
-    extract::{Host, RawForm, State},
+    extract::{RawForm, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Redirect, Response},
 };
@@ -9,11 +9,18 @@ use chrono::{SecondsFormat, Utc};
 use uuid::Uuid;
 
 use crate::{
+    auth::EdgeAuthVerifier,
     error::AppError,
     pre_interest_api::{InterestArea, PreInterestRegistrationRequest, RegistrationHost},
     AppState,
 };
 
+const EDGE_SECRET_HEADER: &str = "x-auth-edge-secret";
+const FORWARDED_HOST_HEADER: &str = "x-forwarded-host";
+const FORWARDED_PROTO_HEADER: &str = "x-forwarded-proto";
+const PARTY_TYPE_HEADER: &str = "x-canonical-party-type";
+const PUBLIC_SURFACE_HEADER: &str = "x-canonical-public-surface";
+const PUBLIC_SURFACE_VALUE: &str = "pre-interest";
 const MAX_FORM_FIELDS: usize = 32;
 const MAX_KEY_BYTES: usize = 64;
 const MAX_VALUE_BYTES: usize = 2_048;
@@ -34,11 +41,10 @@ const ALLOWED_FIELDS: &[&str] = &[
 
 pub async fn submit(
     State(state): State<AppState>,
-    Host(raw_host): Host,
     headers: HeaderMap,
     RawForm(body): RawForm,
 ) -> Response {
-    let host = match verify_same_origin(&raw_host, &headers) {
+    let host = match verify_public_ingress(&headers, &state.edge_auth) {
         Ok(host) => host,
         Err(AppError::Forbidden) => return forbidden_response(),
         Err(_) => return invalid_response(),
@@ -72,13 +78,33 @@ pub async fn submit(
     }
 }
 
-fn verify_same_origin(raw_host: &str, headers: &HeaderMap) -> Result<RegistrationHost, AppError> {
-    let host = RegistrationHost::parse(raw_host).ok_or(AppError::Forbidden)?;
+fn verify_public_ingress(
+    headers: &HeaderMap,
+    edge_auth: &EdgeAuthVerifier,
+) -> Result<RegistrationHost, AppError> {
+    let supplied_secret = required_header(headers, EDGE_SECRET_HEADER, 512)?;
+    if !edge_auth.verify(supplied_secret) {
+        return Err(AppError::Forbidden);
+    }
+
+    if required_header(headers, FORWARDED_PROTO_HEADER, 16)? != "https"
+        || required_header(headers, PUBLIC_SURFACE_HEADER, 64)? != PUBLIC_SURFACE_VALUE
+    {
+        return Err(AppError::Forbidden);
+    }
+
+    let forwarded_host = required_header(headers, FORWARDED_HOST_HEADER, 253)?;
+    let host = RegistrationHost::parse(forwarded_host).ok_or(AppError::Forbidden)?;
+    let expected_party_type = match host {
+        RegistrationHost::User => "individual",
+        RegistrationHost::Organization => "organization",
+    };
+    if required_header(headers, PARTY_TYPE_HEADER, 32)? != expected_party_type {
+        return Err(AppError::Forbidden);
+    }
+
     let expected_origin = format!("https://{}", host.as_str());
-    let origin = headers
-        .get(header::ORIGIN)
-        .and_then(|value| value.to_str().ok())
-        .ok_or(AppError::Forbidden)?;
+    let origin = required_header(headers, header::ORIGIN.as_str(), 512)?;
     if origin != expected_origin {
         return Err(AppError::Forbidden);
     }
@@ -91,6 +117,26 @@ fn verify_same_origin(raw_host: &str, headers: &HeaderMap) -> Result<Registratio
         }
     }
     Ok(host)
+}
+
+fn required_header<'a>(
+    headers: &'a HeaderMap,
+    name: &'static str,
+    max_len: usize,
+) -> Result<&'a str, AppError> {
+    let value = headers
+        .get(name)
+        .ok_or(AppError::Forbidden)?
+        .to_str()
+        .map_err(|_| AppError::Forbidden)?;
+    if value.is_empty()
+        || value.len() > max_len
+        || value.trim() != value
+        || value.chars().any(char::is_control)
+    {
+        return Err(AppError::Forbidden);
+    }
+    Ok(value)
 }
 
 struct PreInterestForm {
@@ -400,10 +446,24 @@ fn unavailable_response() -> Response {
 mod tests {
     use super::*;
 
-    fn headers(origin: &'static str) -> HeaderMap {
+    const EDGE_SECRET: &str = "a-very-long-test-secret-that-is-not-production";
+
+    fn headers(host: &'static str, party_type: &'static str) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert(header::ORIGIN, HeaderValue::from_static(origin));
+        headers.insert(header::ORIGIN, HeaderValue::from_static(match host {
+            "user.canonical.plus" => "https://user.canonical.plus",
+            "org.canonical.plus" => "https://org.canonical.plus",
+            _ => "https://invalid.canonical.plus",
+        }));
         headers.insert(SEC_FETCH_SITE, HeaderValue::from_static("same-origin"));
+        headers.insert(EDGE_SECRET_HEADER, HeaderValue::from_static(EDGE_SECRET));
+        headers.insert(FORWARDED_HOST_HEADER, HeaderValue::from_static(host));
+        headers.insert(FORWARDED_PROTO_HEADER, HeaderValue::from_static("https"));
+        headers.insert(
+            PUBLIC_SURFACE_HEADER,
+            HeaderValue::from_static(PUBLIC_SURFACE_VALUE),
+        );
+        headers.insert(PARTY_TYPE_HEADER, HeaderValue::from_static(party_type));
         headers
     }
 
@@ -456,22 +516,40 @@ mod tests {
     }
 
     #[test]
-    fn origin_and_host_must_match_exactly() {
-        assert!(verify_same_origin(
-            "user.canonical.plus",
-            &headers("https://user.canonical.plus")
+    fn edge_secret_host_origin_and_party_must_all_match() {
+        let verifier = EdgeAuthVerifier::for_test(EDGE_SECRET);
+        assert!(verify_public_ingress(
+            &headers("user.canonical.plus", "individual"),
+            &verifier
         )
         .is_ok());
-        assert!(verify_same_origin(
-            "user.canonical.plus",
-            &headers("https://org.canonical.plus")
+        assert!(verify_public_ingress(
+            &headers("user.canonical.plus", "organization"),
+            &verifier
         )
         .is_err());
-        assert!(verify_same_origin(
-            "user.canonical.plus.evil.example",
-            &headers("https://user.canonical.plus.evil.example")
-        )
-        .is_err());
+
+        let mut forged = headers("user.canonical.plus", "individual");
+        forged.insert(
+            EDGE_SECRET_HEADER,
+            HeaderValue::from_static("a-very-long-test-secret-that-is-not-productioN"),
+        );
+        assert!(verify_public_ingress(&forged, &verifier).is_err());
+
+        let mut cross_origin = headers("user.canonical.plus", "individual");
+        cross_origin.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://org.canonical.plus"),
+        );
+        assert!(verify_public_ingress(&cross_origin, &verifier).is_err());
+    }
+
+    #[test]
+    fn unsigned_forwarded_host_is_never_trusted() {
+        let verifier = EdgeAuthVerifier::for_test(EDGE_SECRET);
+        let mut unsigned = headers("org.canonical.plus", "organization");
+        unsigned.remove(EDGE_SECRET_HEADER);
+        assert!(verify_public_ingress(&unsigned, &verifier).is_err());
     }
 
     #[test]
