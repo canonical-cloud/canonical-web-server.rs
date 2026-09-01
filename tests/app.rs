@@ -771,12 +771,12 @@ async fn application_and_marketing_routes_receive_tailored_security_headers() {
         "no-store"
     );
 
-    let quote_form = app
+    let readiness_form = app
         .clone()
-        .oneshot(Request::get("/u/quote").body(Body::empty()).unwrap())
+        .oneshot(Request::get("/u/readiness").body(Body::empty()).unwrap())
         .await
         .unwrap();
-    let quote_csp = quote_form
+    let quote_csp = readiness_form
         .headers()
         .get(header::CONTENT_SECURITY_POLICY)
         .unwrap()
@@ -788,7 +788,7 @@ async fn application_and_marketing_routes_receive_tailored_security_headers() {
     let quote_detail = app
         .clone()
         .oneshot(
-            Request::get("/u/quote/00000000-0000-4000-8000-000000000000")
+            Request::get("/u/readiness/00000000-0000-4000-8000-000000000000")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1743,7 +1743,7 @@ async fn engagement_lifecycle_create_list_detail_status_note() {
     let (_, page) = authed_get(&app, "/app/engagements", &session).await;
     assert!(page.contains("Acme Corp"));
     assert!(page.contains("SOC 2"));
-    assert!(page.contains("report due 2026-12-31"));
+    assert!(page.contains("independent review target 2026-12-31"));
     let id = first_engagement_id(&page);
 
     let (status, detail) = authed_get(&app, &format!("/app/engagements/{id}"), &session).await;
@@ -1761,7 +1761,7 @@ async fn engagement_lifecycle_create_list_detail_status_note() {
     .await;
     assert_eq!(update.status(), StatusCode::OK);
     let fragment = body_text(update).await;
-    assert!(fragment.contains("Status: In audit"));
+    assert!(fragment.contains("Status: Independent review"));
 
     let note = authed_post(
         &app,
@@ -1775,7 +1775,7 @@ async fn engagement_lifecycle_create_list_detail_status_note() {
 
     let (_, detail) = authed_get(&app, &format!("/app/engagements/{id}"), &session).await;
     assert!(detail.contains("Kickoff call scheduled"));
-    assert!(detail.contains("Status: In audit"));
+    assert!(detail.contains("Status: Independent review"));
 }
 
 #[tokio::test]

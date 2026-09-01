@@ -14,7 +14,7 @@ use maud::html;
 use serde::Deserialize;
 use uuid::Uuid;
 
-const QUOTE_RETURN_PATH: &str = "/u/quote";
+const QUOTE_RETURN_PATH: &str = "/u/readiness";
 const SHARED_AUTH_BROWSER_SIGN_IN_PATH: &str = "/shared-auth/auth/browser/sign-in";
 
 pub async fn page(
@@ -92,7 +92,7 @@ pub async fn submit(
         Ok(record) if headers.contains_key("hx-request") => {
             quote_api::quote_status_fragment(&record).into_response()
         }
-        Ok(record) => Redirect::to(&format!("/u/quote/{}", record.id)).into_response(),
+        Ok(record) => Redirect::to(&format!("/u/readiness/{}", record.id)).into_response(),
         Err(AppError::BadRequest(message)) => form_error(&headers, &message),
         Err(error) => error.into_response(),
     }

@@ -34,6 +34,7 @@ pub fn router(state: AppState) -> Router {
     // API-only responses.
     let quote_form = Router::new()
         .route("/u/quote", get(quote::page).post(quote::submit))
+        .route("/u/readiness", get(quote::page).post(quote::submit))
         .layer(SetResponseHeaderLayer::overriding(
             header::CONTENT_SECURITY_POLICY,
             quote_content_security_policy,
@@ -43,6 +44,7 @@ pub fn router(state: AppState) -> Router {
         .route("/login", get(auth::login_page))
         .route("/ws", axum::routing::any(websocket::upgrade))
         .route("/u/quote/{id}", get(quote::detail))
+        .route("/u/readiness/{id}", get(quote::detail))
         .merge(quote_form)
         .nest("/api", api::router())
         .nest("/auth", auth::router())
