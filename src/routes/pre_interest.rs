@@ -10,9 +10,7 @@ use uuid::Uuid;
 
 use crate::{
     error::AppError,
-    pre_interest_api::{
-        InterestArea, PreInterestRegistrationRequest, RegistrationHost,
-    },
+    pre_interest_api::{InterestArea, PreInterestRegistrationRequest, RegistrationHost},
     AppState,
 };
 
@@ -74,10 +72,7 @@ pub async fn submit(
     }
 }
 
-fn verify_same_origin(
-    raw_host: &str,
-    headers: &HeaderMap,
-) -> Result<RegistrationHost, AppError> {
+fn verify_same_origin(raw_host: &str, headers: &HeaderMap) -> Result<RegistrationHost, AppError> {
     let host = RegistrationHost::parse(raw_host).ok_or(AppError::Forbidden)?;
     let expected_origin = format!("https://{}", host.as_str());
     let origin = headers
@@ -167,9 +162,7 @@ impl PreInterestForm {
             _ => return Err(invalid_form()),
         };
         let marketing_consent_revision = if marketing_consent {
-            Some(portable_identifier(
-                &self.marketing_consent_copy_revision,
-            )?)
+            Some(portable_identifier(&self.marketing_consent_copy_revision)?)
         } else {
             None
         };
@@ -363,10 +356,9 @@ fn portable_identifier(value: &str) -> Result<String, AppError> {
     let value = value.trim();
     if value.is_empty()
         || value.len() > 64
-        || !value
-            .bytes()
-            .enumerate()
-            .all(|(index, byte)| byte.is_ascii_alphanumeric() || (index > 0 && b"._-".contains(&byte)))
+        || !value.bytes().enumerate().all(|(index, byte)| {
+            byte.is_ascii_alphanumeric() || (index > 0 && b"._-".contains(&byte))
+        })
     {
         return Err(invalid_form());
     }
@@ -411,10 +403,7 @@ mod tests {
     fn headers(origin: &'static str) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(header::ORIGIN, HeaderValue::from_static(origin));
-        headers.insert(
-            SEC_FETCH_SITE,
-            HeaderValue::from_static("same-origin"),
-        );
+        headers.insert(SEC_FETCH_SITE, HeaderValue::from_static("same-origin"));
         headers
     }
 
@@ -439,7 +428,10 @@ mod tests {
         assert_eq!(request.request_id, request_id);
         assert_eq!(request.email, "alex@example.com");
         assert_eq!(request.source_host, "user.canonical.plus");
-        assert_eq!(request.party_type, crate::pre_interest_api::PartyType::Individual);
+        assert_eq!(
+            request.party_type,
+            crate::pre_interest_api::PartyType::Individual
+        );
         assert!(request.registration_consent);
         assert!(request.marketing_consent);
         assert_eq!(
