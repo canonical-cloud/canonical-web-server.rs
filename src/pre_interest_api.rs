@@ -19,14 +19,14 @@ use crate::error::AppError;
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const CREATE_PATH: &str = "/api/v1/pre-interest/registrations";
 
-#[derive(Clone, Copy, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PartyType {
     Individual,
     Organization,
 }
 
-#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub enum InterestArea {
     #[serde(rename = "readiness_assessment")]
     ReadinessAssessment,
@@ -65,7 +65,7 @@ impl InterestArea {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RegistrationHost {
     User,
     Organization,
@@ -275,9 +275,7 @@ mod tests {
 
     #[test]
     fn next_steps_are_closed_and_same_site() {
-        assert!(is_reviewed_next_step(
-            "https://user.canonical.plus/u/quote"
-        ));
+        assert!(is_reviewed_next_step("https://user.canonical.plus/u/quote"));
         assert!(is_reviewed_next_step(
             "https://org.canonical.plus/submit-application"
         ));
@@ -290,13 +288,11 @@ mod tests {
     #[test]
     fn registration_hosts_are_closed() {
         assert_eq!(
-            RegistrationHost::parse("user.canonical.plus")
-                .map(RegistrationHost::as_str),
+            RegistrationHost::parse("user.canonical.plus").map(RegistrationHost::as_str),
             Some("user.canonical.plus")
         );
         assert_eq!(
-            RegistrationHost::parse("org.canonical.plus")
-                .map(RegistrationHost::party_type),
+            RegistrationHost::parse("org.canonical.plus").map(RegistrationHost::party_type),
             Some(PartyType::Organization)
         );
         assert!(RegistrationHost::parse("api.canonical.plus").is_none());
