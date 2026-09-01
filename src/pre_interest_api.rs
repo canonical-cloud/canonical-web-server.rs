@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::error::AppError;
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
-const CREATE_PATH: &str = "/v1/pre-interest-registrations";
+const CREATE_PATH: &str = "/api/v1/pre-interest/registrations";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
