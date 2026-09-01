@@ -1,6 +1,7 @@
 mod auth;
 mod health;
 mod pages;
+mod pre_interest;
 mod quote;
 mod websocket;
 
@@ -8,15 +9,17 @@ pub mod api;
 
 use crate::{metrics, views, AppState};
 use axum::{
+    extract::DefaultBodyLimit,
     http::{header, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
-    routing::{any, get},
+    routing::{any, get, post},
     Router,
 };
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 
 const MARKETING_CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'";
+const PUBLIC_INTAKE_BODY_LIMIT: usize = 16 * 1024;
 
 pub fn router(state: AppState) -> Router {
     let marketing_files = ServeDir::new(&state.config.static_dir)
@@ -39,6 +42,17 @@ pub fn router(state: AppState) -> Router {
             quote_content_security_policy,
         ));
 
+    // Anonymous intake is accepted only through the same-origin BFF. Keep the
+    // parser/body budget local to this one route and prevent every response
+    // from entering browser or intermediary caches.
+    let public_intake = Router::new()
+        .route("/forms/pre-interest", post(pre_interest::submit))
+        .layer(DefaultBodyLimit::max(PUBLIC_INTAKE_BODY_LIMIT))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store"),
+        ));
+
     let private_application = Router::new()
         .route("/login", get(auth::login_page))
         .route("/ws", axum::routing::any(websocket::upgrade))
@@ -59,6 +73,7 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(health::healthz))
         .route("/readyz", get(health::readyz))
         .route("/metrics", get(metrics::endpoint))
+        .merge(public_intake)
         .merge(private_application)
         // Administrative UI/API lives on a separate future origin and
         // process. Reserve this namespace so it can never be answered by the
