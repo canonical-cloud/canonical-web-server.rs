@@ -450,11 +450,14 @@ mod tests {
 
     fn headers(host: &'static str, party_type: &'static str) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert(header::ORIGIN, HeaderValue::from_static(match host {
-            "user.canonical.plus" => "https://user.canonical.plus",
-            "org.canonical.plus" => "https://org.canonical.plus",
-            _ => "https://invalid.canonical.plus",
-        }));
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static(match host {
+                "user.canonical.plus" => "https://user.canonical.plus",
+                "org.canonical.plus" => "https://org.canonical.plus",
+                _ => "https://invalid.canonical.plus",
+            }),
+        );
         headers.insert(SEC_FETCH_SITE, HeaderValue::from_static("same-origin"));
         headers.insert(EDGE_SECRET_HEADER, HeaderValue::from_static(EDGE_SECRET));
         headers.insert(FORWARDED_HOST_HEADER, HeaderValue::from_static(host));
@@ -518,16 +521,13 @@ mod tests {
     #[test]
     fn edge_secret_host_origin_and_party_must_all_match() {
         let verifier = EdgeAuthVerifier::for_test(EDGE_SECRET);
-        assert!(verify_public_ingress(
-            &headers("user.canonical.plus", "individual"),
-            &verifier
-        )
-        .is_ok());
-        assert!(verify_public_ingress(
-            &headers("user.canonical.plus", "organization"),
-            &verifier
-        )
-        .is_err());
+        assert!(
+            verify_public_ingress(&headers("user.canonical.plus", "individual"), &verifier).is_ok()
+        );
+        assert!(
+            verify_public_ingress(&headers("user.canonical.plus", "organization"), &verifier)
+                .is_err()
+        );
 
         let mut forged = headers("user.canonical.plus", "individual");
         forged.insert(
