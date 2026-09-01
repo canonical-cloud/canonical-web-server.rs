@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::error::AppError;
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
-const CREATE_PATH: &str = "/api/v1/pre-interest/registrations";
+const CREATE_PATH: &str = "/v1/pre-interest-registrations";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -272,6 +272,11 @@ fn is_reviewed_next_step(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn api_path_matches_the_authoritative_interface_contract() {
+        assert_eq!(CREATE_PATH, "/v1/pre-interest-registrations");
+    }
 
     #[test]
     fn next_steps_are_closed_and_same_site() {
