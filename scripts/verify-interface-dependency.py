@@ -78,12 +78,12 @@ def main() -> None:
         if hook.is_symlink() or not hook.is_file():
             fail(f"missing regular lifecycle hook: {hook.relative_to(ROOT)}")
 
-    required_markers = {
+    required_markers = (
         "use canonical_interfaces::{HealthStatus, HealthStatusStatus, ServiceInfo};",
         "Json<HealthStatus>",
         "Json<ServiceInfo>",
         "HealthStatusStatus::Ok",
-    }
+    )
     for relative in consumers:
         if not isinstance(relative, str) or not relative:
             fail("consumer paths must be non-empty strings")
@@ -91,9 +91,12 @@ def main() -> None:
         if not path.is_relative_to(ROOT) or not path.is_file():
             fail(f"missing interface consumer: {relative}")
         source = path.read_text(encoding="utf-8")
-        missing = sorted(required_markers - set(source.splitlines()))
+        missing = [marker for marker in required_markers if marker not in source]
         if missing:
-            fail(f"{relative} does not import and construct generated health/info types")
+            fail(
+                f"{relative} does not import and construct generated health/info types; "
+                f"missing={missing}"
+            )
         if "struct HealthResponse" in source or "struct InfoResponse" in source:
             fail(f"{relative} redefines health/info contracts instead of importing them")
 
