@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -eu
+sh ./.zpkg/pre-build
+if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git diff --exit-code -- .zpkg.toml .zpkg contracts/interfaces-source.lock.json scripts/verify-interface-dependency.py src/routes/health.rs Cargo.toml Cargo.lock
+fi
