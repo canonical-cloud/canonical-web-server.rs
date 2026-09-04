@@ -9,6 +9,7 @@ pub mod database;
 pub mod error;
 pub mod metrics;
 pub mod quote_api;
+pub mod quote_grant;
 pub mod routes;
 pub mod server;
 pub mod sync;

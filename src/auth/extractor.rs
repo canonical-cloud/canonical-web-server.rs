@@ -135,20 +135,25 @@ async fn authenticate_quote(
     }
 
     let jar = CookieJar::from_headers(&parts.headers);
+    // A Shared Auth customer session takes precedence for quote ownership even
+    // when a legacy Canonical/Supabase cookie is also present. That keeps the
+    // verified-contact principal and the API owner subject identical.
+    if let Some(token) = jar
+        .get(state.shared_auth.cookie_name())
+        .map(|cookie| cookie.value())
+    {
+        let _permit = state
+            .bearer_auth_semaphore
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| AppError::AuthBusy)?;
+        return state.shared_auth.authenticate_session(token).await;
+    }
+
     if jar.get(&state.config.session_cookie).is_some() {
         return authenticate(parts, state, false).await;
     }
-
-    let token = jar
-        .get(state.shared_auth.cookie_name())
-        .map(|cookie| cookie.value())
-        .ok_or(AppError::Unauthorized)?;
-    let _permit = state
-        .bearer_auth_semaphore
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| AppError::AuthBusy)?;
-    state.shared_auth.authenticate_session(token).await
+    Err(AppError::Unauthorized)
 }
 
 fn bearer_token(headers: &HeaderMap) -> Result<Option<&str>, AppError> {

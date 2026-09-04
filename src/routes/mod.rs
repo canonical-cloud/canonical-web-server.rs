@@ -31,7 +31,34 @@ pub fn router(state: AppState) -> Router {
     let private_application = Router::new()
         .route("/login", get(auth::login_page))
         .route("/ws", axum::routing::any(websocket::upgrade))
+        .route("/q/{capability}", get(quote::redeem_link))
+        .route("/quote", get(quote::page).post(quote::submit))
+        .route(
+            "/quote/phone/request",
+            axum::routing::post(quote::request_phone),
+        )
+        .route(
+            "/quote/phone/verify",
+            axum::routing::post(quote::verify_phone),
+        )
+        .route(
+            "/quote/{id}/submissions",
+            axum::routing::post(quote::link_resubmit),
+        )
+        .route("/quote/{id}", get(quote::link_detail))
         .route("/u/quote", get(quote::page).post(quote::submit))
+        .route(
+            "/u/quote/phone/request",
+            axum::routing::post(quote::request_phone),
+        )
+        .route(
+            "/u/quote/phone/verify",
+            axum::routing::post(quote::verify_phone),
+        )
+        .route(
+            "/u/quote/{id}/submissions",
+            axum::routing::post(quote::resubmit),
+        )
         .route("/u/quote/{id}", get(quote::detail))
         .nest("/api", api::router())
         .nest("/auth", auth::router())

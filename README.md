@@ -42,8 +42,12 @@ credentials or the server's Supabase token pair.
 - `src/routes/` — probes, Maud/HTMX pages, versioned REST, and authenticated
   WebSocket upgrade handling.
 - `src/quote_api.rs` — bounded client and Maud views for the separately deployed
-  `canonical-api-server.rs`; it sends a verified user id under a dedicated
-  service credential and never exposes Gemini or database credentials.
+  `canonical-api-server.rs`; it sends the Shared Auth subject and live verified
+  contacts under a dedicated service credential and never exposes Gemini,
+  Twilio, contact-encryption, or database credentials.
+- `src/quote_grant.rs` — authenticated encryption for one-hour, quote-scoped
+  browser grants exchanged from the revocable 25-day SMS capability. It is not
+  a general account session.
 - `src/sync/` — compare-and-swap mutations, durable idempotency, tombstones,
   owner-bound encrypted cursors, and pull pagination.
 - `src/ws/` — owner-scoped in-process fanout plus a bounded PostgreSQL
@@ -69,8 +73,12 @@ new kind only with matching validation, authorization, schema, and merge rules.
 | `POST` | `/auth/login` | Supabase password login and opaque session creation |
 | `POST` | `/auth/logout` | CSRF-protected local/Supabase logout |
 | `GET` | `/app` | Authenticated Maud application shell |
-| `GET`, `POST` | `/u/quote` | Shared-auth-protected compliance quote workflow |
-| `GET` | `/u/quote/{quote_id}` | Owner-scoped quote status/detail |
+| `GET`, `POST` | `/quote` | Public entry; email OTP establishes Shared Auth, then phone OTP and explicit contact confirmation gate submission |
+| `GET`, `POST` | `/u/quote` | Signed-in entry; verified contacts are prefilled but must still be explicitly confirmed |
+| `POST` | `/quote/phone/{request,verify}`, `/u/quote/phone/{request,verify}` | CSRF-protected Twilio Verify enrollment through Shared Auth |
+| `GET` | `/q/{capability}` | Consume the SMS capability and immediately redirect to a clean quote URL |
+| `GET`, `POST` | `/quote/{quote_id}`, `/quote/{quote_id}/submissions` | Quote-scoped view/edit/resubmit using the encrypted one-hour grant cookie |
+| `GET`, `POST` | `/u/quote/{quote_id}`, `/u/quote/{quote_id}/submissions` | Account owner view/edit/resubmit |
 | `GET` | `/app/fragments/session` | HTMX session fragment |
 | `GET` | `/api/v1/{health,info,me}` | Versioned REST metadata/current user |
 | `GET` | `/api/v1/sync/changes` | Incremental authoritative pull |
@@ -80,6 +88,21 @@ new kind only with matching validation, authorization, schema, and merge rules.
 `/api/health` and `/api/info` remain compatibility aliases. Unknown API and
 application paths have JSON and HTML 404s respectively rather than falling
 through to the marketing SPA.
+
+The quote form never treats typed email or phone values as proof. `/quote`
+redirects an unauthenticated visitor to the customer Shared Auth passwordless
+email flow. The BFF then reads `/auth/me/contacts`, runs phone enrollment through
+Shared Auth's authenticated SMS endpoints when needed, and displays two
+unselected confirmation controls. Only after both clicks does it create a
+15-minute, owner-bound contact selection at the quote API and submit the
+questionnaire. The API's durable `202` means the browser can close safely.
+
+The capability in `/q/{capability}` is sent only by the API's Twilio Messaging
+outbox. This server exchanges it server-to-server, sets an HttpOnly, Secure,
+SameSite=Lax encrypted quote grant, and returns a `303` redirect to
+`/quote/{quote_id}`. Telemetry exports the matched route template rather than
+the raw capability path. The grant can view, edit, and append a new immutable
+revision for that quote only.
 
 ## Multi-instance invalidations
 

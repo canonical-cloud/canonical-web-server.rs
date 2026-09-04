@@ -14,4 +14,4 @@ pub use extractor::{
     QuoteSessionAuthenticated, SessionAuthenticated,
 };
 pub use rate_limit::LoginRateLimiter;
-pub use shared_auth::SharedAuthVerifier;
+pub use shared_auth::{SharedAuthVerifier, SmsChallenge, VerifiedContact, VerifiedContacts};

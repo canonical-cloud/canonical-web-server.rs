@@ -1,8 +1,11 @@
 use std::{env, time::Duration};
 
+use axum::http::HeaderMap;
+use axum_extra::extract::cookie::CookieJar;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{TimeZone as _, Utc};
 use reqwest::{header, StatusCode, Url};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
@@ -14,6 +17,7 @@ const DEFAULT_LOOPBACK_COOKIE: &str = "canonical-customer-auth";
 const VERIFY_PATH: &str = "/shared-auth/auth/verify";
 const MAX_TOKEN_BYTES: usize = 16 * 1024;
 const MAX_EMAIL_BYTES: usize = 320;
+const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 
 /// Origin-side verifier for first-party Shared Auth access tokens.
 ///
@@ -26,6 +30,9 @@ const MAX_EMAIL_BYTES: usize = 320;
 #[derive(Clone)]
 pub struct SharedAuthVerifier {
     client: reqwest::Client,
+    contacts_url: Url,
+    sms_request_url: Url,
+    sms_verify_url: Url,
     verify_url: Url,
     cookie_name: String,
     csrf_key: [u8; 32],
@@ -54,6 +61,9 @@ impl SharedAuthVerifier {
                 AppError::BadRequest("SHARED_AUTH_VERIFY_URL must be an absolute URL".into())
             })?;
         validate_verify_url(&verify_url)?;
+        let contacts_url = shared_auth_endpoint(&verify_url, "me/contacts")?;
+        let sms_request_url = shared_auth_endpoint(&verify_url, "mfa/sms/request")?;
+        let sms_verify_url = shared_auth_endpoint(&verify_url, "mfa/sms/verify")?;
 
         let csrf_key: [u8; 32] = config
             .session_encryption_key
@@ -68,6 +78,9 @@ impl SharedAuthVerifier {
 
         Ok(Self {
             client,
+            contacts_url,
+            sms_request_url,
+            sms_verify_url,
             verify_url,
             cookie_name,
             csrf_key,
@@ -76,6 +89,62 @@ impl SharedAuthVerifier {
 
     pub fn cookie_name(&self) -> &str {
         &self.cookie_name
+    }
+
+    pub fn session_token(&self, headers: &HeaderMap) -> Option<String> {
+        CookieJar::from_headers(headers)
+            .get(&self.cookie_name)
+            .map(|cookie| cookie.value().to_owned())
+    }
+
+    pub async fn verified_contacts(&self, token: &str) -> Result<VerifiedContacts, AppError> {
+        let response = self
+            .client
+            .get(self.contacts_url.clone())
+            .bearer_auth(token)
+            .header(header::ACCEPT, "application/json")
+            .send()
+            .await
+            .map_err(|_| AppError::AuthUpstream)?;
+        decode_json(response, StatusCode::OK).await
+    }
+
+    pub async fn request_phone_verification(
+        &self,
+        token: &str,
+        phone: &str,
+    ) -> Result<SmsChallenge, AppError> {
+        let response = self
+            .client
+            .post(self.sms_request_url.clone())
+            .bearer_auth(token)
+            .json(&SmsChallengeRequest { phone })
+            .send()
+            .await
+            .map_err(|_| AppError::AuthUpstream)?;
+        decode_json(response, StatusCode::ACCEPTED).await
+    }
+
+    pub async fn verify_phone(
+        &self,
+        token: &str,
+        challenge_id: Uuid,
+        code: &str,
+    ) -> Result<(), AppError> {
+        let response = self
+            .client
+            .post(self.sms_verify_url.clone())
+            .bearer_auth(token)
+            .json(&SmsVerifyRequest { challenge_id, code })
+            .send()
+            .await
+            .map_err(|_| AppError::AuthUpstream)?;
+        match response.status() {
+            StatusCode::OK => Ok(()),
+            StatusCode::BAD_REQUEST | StatusCode::UNAUTHORIZED => Err(AppError::Unauthorized),
+            StatusCode::TOO_MANY_REQUESTS => Err(AppError::AuthBusy),
+            _ => Err(AppError::AuthUpstream),
+        }
     }
 
     pub async fn authenticate_session(&self, token: &str) -> Result<AuthContext, AppError> {
@@ -152,6 +221,67 @@ impl SharedAuthVerifier {
         digest.update(token.as_bytes());
         URL_SAFE_NO_PAD.encode(digest.finalize())
     }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct VerifiedContact {
+    pub value: String,
+    pub verified: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct VerifiedContacts {
+    pub email: Option<VerifiedContact>,
+    pub phone: Option<VerifiedContact>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct SmsChallenge {
+    pub challenge_id: Uuid,
+    pub expires_at: u64,
+    pub phone_hint: String,
+}
+
+#[derive(Serialize)]
+struct SmsChallengeRequest<'a> {
+    phone: &'a str,
+}
+
+#[derive(Serialize)]
+struct SmsVerifyRequest<'a> {
+    challenge_id: Uuid,
+    code: &'a str,
+}
+
+async fn decode_json<T: for<'de> Deserialize<'de>>(
+    response: reqwest::Response,
+    expected: StatusCode,
+) -> Result<T, AppError> {
+    match response.status() {
+        status if status == expected => {}
+        StatusCode::BAD_REQUEST | StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+            return Err(AppError::Unauthorized)
+        }
+        StatusCode::TOO_MANY_REQUESTS => return Err(AppError::AuthBusy),
+        _ => return Err(AppError::AuthUpstream),
+    }
+    let bytes = response.bytes().await.map_err(|_| AppError::AuthUpstream)?;
+    if bytes.len() > MAX_RESPONSE_BYTES {
+        return Err(AppError::AuthUpstream);
+    }
+    serde_json::from_slice(&bytes).map_err(|_| AppError::AuthUpstream)
+}
+
+fn shared_auth_endpoint(verify_url: &Url, suffix: &str) -> Result<Url, AppError> {
+    let prefix = verify_url
+        .path()
+        .strip_suffix("/auth/verify")
+        .ok_or_else(|| {
+            AppError::BadRequest("SHARED_AUTH_VERIFY_URL must end in /auth/verify".into())
+        })?;
+    let mut endpoint = verify_url.clone();
+    endpoint.set_path(&format!("{prefix}/auth/{suffix}"));
+    Ok(endpoint)
 }
 
 fn required_header(
@@ -242,9 +372,13 @@ mod tests {
     use super::*;
 
     fn verifier() -> SharedAuthVerifier {
+        let verify_url = Url::parse("https://app.canonical.plus/shared-auth/auth/verify").unwrap();
         SharedAuthVerifier {
             client: reqwest::Client::new(),
-            verify_url: Url::parse("https://app.canonical.plus/shared-auth/auth/verify").unwrap(),
+            contacts_url: shared_auth_endpoint(&verify_url, "me/contacts").unwrap(),
+            sms_request_url: shared_auth_endpoint(&verify_url, "mfa/sms/request").unwrap(),
+            sms_verify_url: shared_auth_endpoint(&verify_url, "mfa/sms/verify").unwrap(),
+            verify_url,
             cookie_name: DEFAULT_SECURE_COOKIE.into(),
             csrf_key: [7; 32],
         }
@@ -298,5 +432,28 @@ mod tests {
             &Url::parse("https://app.canonical.plus/auth/verify?token=secret").unwrap()
         )
         .is_err());
+    }
+
+    #[test]
+    fn shared_auth_product_endpoints_preserve_the_mfa_route_prefix() {
+        let verify_url = Url::parse("https://app.canonical.plus/shared-auth/auth/verify").unwrap();
+        assert_eq!(
+            shared_auth_endpoint(&verify_url, "me/contacts")
+                .unwrap()
+                .as_str(),
+            "https://app.canonical.plus/shared-auth/auth/me/contacts"
+        );
+        assert_eq!(
+            shared_auth_endpoint(&verify_url, "mfa/sms/request")
+                .unwrap()
+                .as_str(),
+            "https://app.canonical.plus/shared-auth/auth/mfa/sms/request"
+        );
+        assert_eq!(
+            shared_auth_endpoint(&verify_url, "mfa/sms/verify")
+                .unwrap()
+                .as_str(),
+            "https://app.canonical.plus/shared-auth/auth/mfa/sms/verify"
+        );
     }
 }

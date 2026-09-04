@@ -32,6 +32,7 @@ pub struct AppState {
     pub sessions: auth::SessionService,
     pub shared_auth: auth::SharedAuthVerifier,
     pub(crate) quote_api: Option<Arc<crate::quote_api::QuoteApiClient>>,
+    pub(crate) quote_grants: Arc<crate::quote_grant::QuoteGrantCodec>,
     pub hub: ws::Hub,
     pub(crate) bearer_auth_semaphore: Arc<Semaphore>,
 }
@@ -58,6 +59,10 @@ impl AppState {
         );
         let login_auth_semaphore = Arc::new(Semaphore::new(config.login_auth_max_concurrency));
         let bearer_auth_semaphore = Arc::new(Semaphore::new(config.bearer_auth_max_concurrency));
+        let quote_grants = Arc::new(crate::quote_grant::QuoteGrantCodec::new(
+            &config.session_encryption_key,
+            config.cookie_secure,
+        )?);
 
         Ok(Self {
             config,
@@ -68,6 +73,7 @@ impl AppState {
             sessions,
             shared_auth,
             quote_api: None,
+            quote_grants,
             hub: ws::Hub::new(256),
             bearer_auth_semaphore,
         })
