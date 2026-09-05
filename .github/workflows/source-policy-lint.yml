@@ -45,7 +45,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ores-otel/.github
-          ref: ed4a422095cbee47e115201d111a5dfbc17b5e89
+          ref: 34a36017bfa4da0a820f4a82f8d206958296ebbb
           path: .source-policy
           persist-credentials: false
 
@@ -62,7 +62,7 @@ jobs:
         shell: bash
         run: npm ci --ignore-scripts --prefix .source-policy/tools/ecmascript-lint
 
-      - name: Lint ECMAScript semicolon policy
+      - name: Lint ECMAScript source policy
         if: steps.languages.outputs.ecmascript == 'true'
         shell: bash
         run: node .source-policy/tools/ecmascript-lint/lint.mjs "$GITHUB_WORKSPACE"
@@ -72,7 +72,7 @@ jobs:
         shell: bash
         run: rustup toolchain install 1.88.0 --profile minimal --no-self-update
 
-      - name: Lint Rust explicit-return policy
+      - name: Lint Rust source policy
         if: steps.languages.outputs.rust == 'true'
         shell: bash
         env:
