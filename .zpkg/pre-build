@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
-python3 scripts/verify_interface_contract.py
+python3 scripts/verify-interface-dependency.py
 cargo check --workspace --all-targets --locked

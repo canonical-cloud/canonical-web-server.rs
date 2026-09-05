@@ -2,9 +2,6 @@ use crate::{AppState, SERVICE};
 use axum::{extract::State, http::StatusCode, Json};
 use canonical_interfaces::{HealthStatus, HealthStatusStatus, ServiceInfo};
 
-pub type HealthResponse = HealthStatus;
-pub type InfoResponse = ServiceInfo;
-
 pub async fn healthz() -> StatusCode {
     StatusCode::OK
 }
@@ -19,18 +16,18 @@ pub async fn readyz(State(state): State<AppState>) -> StatusCode {
     }
 }
 
-pub async fn health() -> Json<HealthResponse> {
+pub async fn health() -> Json<HealthStatus> {
     Json(HealthStatus {
         status: HealthStatusStatus::Ok,
-        service: SERVICE.into(),
+        service: SERVICE.to_owned(),
     })
 }
 
-pub async fn info() -> Json<InfoResponse> {
+pub async fn info() -> Json<ServiceInfo> {
     Json(ServiceInfo {
-        service: SERVICE.into(),
-        version: env!("CARGO_PKG_VERSION").into(),
-        domain: "canonical.cloud".into(),
+        service: SERVICE.to_owned(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        domain: "canonical.cloud".to_owned(),
         stack: ["supabase", "maud", "axum", "seaorm", "htmx"]
             .into_iter()
             .map(str::to_owned)
