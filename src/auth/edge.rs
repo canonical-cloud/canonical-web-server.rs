@@ -22,14 +22,11 @@ impl EdgeAuthVerifier {
     /// Loads the secret injected by the Cloudflare Worker. Missing configuration
     /// disables edge identity rather than weakening to unsigned headers.
     pub fn from_env() -> Result<Self, AppError> {
-        let Some(secret) = std::env::var_os("EDGE_AUTH_SHARED_SECRET") else {
+        let Ok(secret) = crate::config::flags::var("EDGE_AUTH_SHARED_SECRET") else {
             return Ok(Self {
                 expected_hash: None,
             });
         };
-        let secret = secret
-            .into_string()
-            .map_err(|_| AppError::BadRequest("EDGE_AUTH_SHARED_SECRET must be UTF-8".into()))?;
         if !(32..=512).contains(&secret.len()) || secret.chars().any(char::is_control) {
             return Err(AppError::BadRequest(
                 "EDGE_AUTH_SHARED_SECRET must contain 32 to 512 non-control characters".into(),

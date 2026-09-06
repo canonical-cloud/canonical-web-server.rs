@@ -1,6 +1,6 @@
 //! Browser-facing quote client and Maud views for the dedicated Canonical API.
 
-use std::{env, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use canonical_interfaces::{
@@ -32,7 +32,7 @@ pub struct QuoteApiClient {
 
 impl QuoteApiClient {
     pub fn from_env() -> Result<Self, AppError> {
-        let raw_url = env::var("CANONICAL_API_URL")
+        let raw_url = crate::config::flags::var("CANONICAL_API_URL")
             .map_err(|_| AppError::BadRequest("CANONICAL_API_URL is required".into()))?;
         let parsed = Url::parse(&raw_url)
             .map_err(|_| AppError::BadRequest("CANONICAL_API_URL must be absolute".into()))?;
@@ -53,9 +53,10 @@ impl QuoteApiClient {
             ));
         }
 
-        let internal_auth_token = env::var("CANONICAL_INTERNAL_AUTH_TOKEN").map_err(|_| {
-            AppError::BadRequest("CANONICAL_INTERNAL_AUTH_TOKEN is required".into())
-        })?;
+        let internal_auth_token = crate::config::flags::var("CANONICAL_INTERNAL_AUTH_TOKEN")
+            .map_err(|_| {
+                AppError::BadRequest("CANONICAL_INTERNAL_AUTH_TOKEN is required".into())
+            })?;
         if internal_auth_token.trim() != internal_auth_token || internal_auth_token.len() < 32 {
             return Err(AppError::BadRequest(
                 "CANONICAL_INTERNAL_AUTH_TOKEN must contain at least 32 bytes".into(),

@@ -1,4 +1,4 @@
-use std::{env, fmt, time::Duration};
+use std::{fmt, time::Duration};
 
 use chrono::{DateTime, Utc};
 use reqwest::{StatusCode, Url};
@@ -174,7 +174,7 @@ pub struct SharedHandoffUser {
 }
 
 fn required(name: &'static str) -> Result<String, IntegrationConfigError> {
-    env::var(name).map_err(|_| IntegrationConfigError::Missing(name))
+    crate::config::flags::var(name).map_err(|_| IntegrationConfigError::Missing(name))
 }
 
 fn validated_identifier(

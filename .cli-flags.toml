@@ -1,0 +1,173 @@
+[identity]
+service = "canonical-web-server"
+type_name = "RuntimeEnv"
+
+[help]
+url = "https://github.com/flags-2-env/flags-2-env"
+columns = ["options", "env", "type", "default", "description"]
+
+[parse]
+allow_unknown = false
+
+[env]
+ignore = ["APP_SESSION_ENCRYPTION_KEY", "CANONICAL_INTERNAL_AUTH_TOKEN", "CANONICAL_TEST_AUTH_ENABLED", "CANONICAL_WEB_SERVICE_TOKEN", "DATABASE_URL", "DEPLOYMENT_ENV", "EDGE_AUTH_SHARED_SECRET", "HOSTNAME", "MIGRATION_DATABASE_URL", "NODE_NAME", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_RESOURCE_ATTRIBUTES", "POD_NAME", "POD_NAMESPACE", "SHARED_AUTH_CLIENT_SECRET", "SUPABASE_PUBLISHABLE_KEY"]
+
+[flags.help]
+env = "CLI_HELP_REQUESTED"
+long = "help"
+short = "h"
+type = "boolean"
+default = false
+help = "Print command-line help."
+
+[flags.version]
+env = "CLI_VERSION_REQUESTED"
+long = "version"
+short = "V"
+type = "boolean"
+default = false
+help = "Print the server version."
+
+[flags.port]
+env = "PORT"
+long = "port"
+type = "integer"
+help = "HTTP listener port."
+
+[flags.static-dir]
+env = "STATIC_DIR"
+long = "static-dir"
+type = "string"
+help = "Static marketing asset directory."
+
+[flags.app-asset-dir]
+env = "APP_ASSET_DIR"
+long = "app-asset-dir"
+type = "string"
+help = "Compiled application asset directory."
+
+[flags.database-max-connections]
+env = "DATABASE_MAX_CONNECTIONS"
+long = "database-max-connections"
+type = "integer"
+help = "Maximum customer database pool connections."
+
+[flags.migration-database-max-connections]
+env = "MIGRATION_DATABASE_MAX_CONNECTIONS"
+long = "migration-database-max-connections"
+type = "integer"
+help = "Maximum migration database connections."
+
+[flags.app-base-url]
+env = "APP_BASE_URL"
+long = "app-base-url"
+type = "string"
+help = "Credential-free public application origin."
+
+[flags.allowed-origins]
+env = "APP_ALLOWED_ORIGINS"
+long = "allowed-origins"
+type = "string"
+help = "Comma-separated exact browser origins."
+
+[flags.session-cookie]
+env = "APP_SESSION_COOKIE"
+long = "session-cookie"
+type = "string"
+help = "Opaque browser session cookie name."
+
+[flags.cookie-secure]
+env = "COOKIE_SECURE"
+long = "cookie-secure"
+type = "boolean"
+help = "Require Secure cookies."
+
+[flags.session-ttl-days]
+env = "APP_SESSION_TTL_DAYS"
+long = "session-ttl-days"
+type = "integer"
+help = "Browser session lifetime in days."
+
+[flags.login-rate-limit-attempts]
+env = "LOGIN_RATE_LIMIT_ATTEMPTS"
+long = "login-rate-limit-attempts"
+type = "integer"
+help = "Per-key login attempts per window."
+
+[flags.login-rate-limit-global-attempts]
+env = "LOGIN_RATE_LIMIT_GLOBAL_ATTEMPTS"
+long = "login-rate-limit-global-attempts"
+type = "integer"
+help = "Global login attempts per window."
+
+[flags.login-rate-limit-window-seconds]
+env = "LOGIN_RATE_LIMIT_WINDOW_SECONDS"
+long = "login-rate-limit-window-seconds"
+type = "integer"
+help = "Login rate-limit window in seconds."
+
+[flags.login-rate-limit-max-keys]
+env = "LOGIN_RATE_LIMIT_MAX_KEYS"
+long = "login-rate-limit-max-keys"
+type = "integer"
+help = "Maximum retained login throttling keys."
+
+[flags.login-auth-max-concurrency]
+env = "LOGIN_AUTH_MAX_CONCURRENCY"
+long = "login-auth-max-concurrency"
+type = "integer"
+help = "Maximum concurrent login authentication calls."
+
+[flags.bearer-auth-max-concurrency]
+env = "BEARER_AUTH_MAX_CONCURRENCY"
+long = "bearer-auth-max-concurrency"
+type = "integer"
+help = "Maximum concurrent bearer authentication calls."
+
+[flags.supabase-url]
+env = "SUPABASE_URL"
+long = "supabase-url"
+type = "string"
+help = "Credential-free Supabase project URL."
+
+[flags.canonical-api-url]
+env = "CANONICAL_API_URL"
+long = "canonical-api-url"
+type = "string"
+help = "Credential-free Canonical API origin."
+
+[flags.shared-auth-base-url]
+env = "SHARED_AUTH_BASE_URL"
+long = "shared-auth-base-url"
+type = "string"
+help = "Credential-free Shared Auth origin."
+
+[flags.shared-auth-client-id]
+env = "SHARED_AUTH_CLIENT_ID"
+long = "shared-auth-client-id"
+type = "string"
+help = "Public Shared Auth client identifier."
+
+[flags.shared-auth-project]
+env = "SHARED_AUTH_SUPABASE_PROJECT"
+long = "shared-auth-project"
+type = "string"
+help = "Expected Shared Auth Supabase project."
+
+[flags.shared-auth-cookie]
+env = "SHARED_AUTH_BROWSER_COOKIE_NAME"
+long = "shared-auth-cookie"
+type = "string"
+help = "Shared Auth browser cookie name."
+
+[flags.shared-auth-verify-url]
+env = "SHARED_AUTH_VERIFY_URL"
+long = "shared-auth-verify-url"
+type = "string"
+help = "Credential-free Shared Auth verification URL."
+
+[flags.rust-log]
+env = "RUST_LOG"
+long = "rust-log"
+type = "string"
+help = "Tracing filter directive."

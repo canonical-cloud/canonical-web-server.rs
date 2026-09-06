@@ -1,0 +1,47 @@
+[identity]
+service = "canonical-session-revoker"
+type_name = "RuntimeEnv"
+
+[help]
+url = "https://github.com/flags-2-env/flags-2-env"
+columns = ["options", "env", "type", "default", "description"]
+
+[parse]
+allow_unknown = false
+
+[env]
+ignore = ["APP_SESSION_ENCRYPTION_KEY", "SESSION_REVOCATION_DATABASE_URL", "SUPABASE_PUBLISHABLE_KEY"]
+
+[flags.help]
+env = "CLI_HELP_REQUESTED"
+long = "help"
+short = "h"
+type = "boolean"
+default = false
+help = "Print command-line help."
+
+[flags.version]
+env = "CLI_VERSION_REQUESTED"
+long = "version"
+short = "V"
+type = "boolean"
+default = false
+help = "Print the worker version."
+
+[flags.database-max-connections]
+env = "SESSION_REVOCATION_DATABASE_MAX_CONNECTIONS"
+long = "database-max-connections"
+type = "integer"
+help = "Maximum session-revocation database connections."
+
+[flags.supabase-url]
+env = "SUPABASE_URL"
+long = "supabase-url"
+type = "string"
+help = "Credential-free Supabase project URL."
+
+[flags.log-filter]
+env = "RUST_LOG"
+long = "log-filter"
+type = "string"
+help = "Tracing filter directive."
