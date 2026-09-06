@@ -60,4 +60,9 @@ ENV APP_ASSET_DIR=/app/client
 ENV STATIC_DIR=/app/static
 EXPOSE 8081
 USER 65532:65532
+# ores-otel: in-process OTLP to the cluster collector. The *-sidecar.rs image is a separate loopback helper on 127.0.0.1:9090 — do not EXPOSE 4317/4318 or 9090.
+ENV OTEL_SERVICE_NAME=canonical-web-server \
+    OTEL_EXPORTER_OTLP_ENDPOINT=http://dd-otel-collector.observability.svc.cluster.local:4318 \
+    RUST_LOG=info
+# ores-sops: distroless has no shell — decrypt host-side (just env-docker-run / k8s Secret from env/enc). Do not bake plaintext or age keys into this image.
 ENTRYPOINT ["/usr/local/bin/canonical-web-server"]
