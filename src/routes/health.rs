@@ -34,3 +34,31 @@ pub async fn info() -> Json<ServiceInfo> {
             .collect(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{health, info};
+    use axum::Json;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn health_uses_the_generated_interface_shape() {
+        let Json(response) = health().await;
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            json!({"status": "ok", "service": "canonical-web-server"})
+        );
+    }
+
+    #[tokio::test]
+    async fn info_uses_the_generated_interface_shape() {
+        let Json(response) = info().await;
+        let value = serde_json::to_value(response).unwrap();
+        assert_eq!(value["service"], "canonical-web-server");
+        assert_eq!(value["domain"], "canonical.cloud");
+        assert_eq!(
+            value["stack"],
+            json!(["supabase", "maud", "axum", "seaorm", "htmx"])
+        );
+    }
+}

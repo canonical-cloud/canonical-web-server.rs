@@ -45,7 +45,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ores-otel/.github
-          ref: 34a36017bfa4da0a820f4a82f8d206958296ebbb
+          ref: c417efc488bb4ca84e078fad9626f55b374913dd
           path: .source-policy
           persist-credentials: false
 
