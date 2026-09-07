@@ -32,6 +32,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Only web needs the browser dependency; use the committed gitlink.
+          submodules: ${{ matrix.target == 'web' && 'recursive' || 'false' }}
       - name: Validate pin and host smoke script
         shell: bash
         run: |
@@ -39,6 +41,9 @@ jobs:
           grep -Eq '^[0-9a-f]{40}$' docker/ores-launcher.rev
           test "$(wc -l < docker/ores-launcher.rev)" -eq 1
           bash -n docker/test-launcher-image.sh
+          if [ "$TARGET" = web ]; then
+            test -s vendor/opto-sync-clients/clients/ts/package.json
+          fi
       - name: Build the actual selected service image
         run: docker build --progress=plain --target "$TARGET" --tag ores-launcher:ci .
       - name: Certify the shell-free image contract
