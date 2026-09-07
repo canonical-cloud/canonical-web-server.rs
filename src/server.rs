@@ -63,7 +63,12 @@ pub(crate) async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::correlate_browser_requests;
-    use axum::{body::Body, http::{Request, StatusCode}, routing::get, Router};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        routing::get,
+        Router,
+    };
     use ores_otel_web::TraceParent;
     use tower::ServiceExt;
 
@@ -76,14 +81,21 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/")
-                    .header("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00")
+                    .header(
+                        "traceparent",
+                        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+                    )
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        let trace: TraceParent = response.headers()["traceparent"].to_str().unwrap().parse().unwrap();
+        let trace: TraceParent = response.headers()["traceparent"]
+            .to_str()
+            .unwrap()
+            .parse()
+            .unwrap();
         assert_eq!(trace.trace_id(), "4bf92f3577b34da6a3ce929d0e0e4736");
         assert_ne!(trace.span_id(), "00f067aa0ba902b7");
         assert!(!trace.sampled());
