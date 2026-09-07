@@ -17,7 +17,8 @@ async function withPage(t) {
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
   t.after(() => browser.close());
-  const page = await browser.newPage();
+  const browserContext = await browser.newContext();
+  const page = await browserContext.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   return { server, page, errors };
@@ -69,6 +70,7 @@ test("readiness: pages and embedded assets require a real session", async (t) =>
 test("readiness: authenticated worksheets round-trip independently without uploading answers", async (t) => {
   const { server, page, errors } = await withPage(t);
   await signIn(page, server);
+  assert.equal(await page.locator('nav a[href="/app/readiness"]').count(), 1);
   const writes = [];
   page.on("request", (request) => {
     if (!["GET", "HEAD"].includes(request.method())) writes.push(request.url());

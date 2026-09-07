@@ -10,9 +10,12 @@ use axum::{
 };
 
 const HTML: &str = include_str!("../../vendor/canonical-auditor-readiness/readiness/index.html");
-const CATALOG: &str = include_str!("../../vendor/canonical-auditor-readiness/readiness/catalog.json");
-const CONTRACT: &str = include_str!("../../vendor/canonical-auditor-readiness/readiness/readiness.mjs");
-const BROWSER: &str = include_str!("../../vendor/canonical-auditor-readiness/readiness/browser.mjs");
+const CATALOG: &str =
+    include_str!("../../vendor/canonical-auditor-readiness/readiness/catalog.json");
+const CONTRACT: &str =
+    include_str!("../../vendor/canonical-auditor-readiness/readiness/readiness.mjs");
+const BROWSER: &str =
+    include_str!("../../vendor/canonical-auditor-readiness/readiness/browser.mjs");
 const CSS: &str = include_str!("../../vendor/canonical-auditor-readiness/readiness/readiness.css");
 const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'";
 const FRAMEWORKS: [&str; 15] = [
@@ -97,10 +100,7 @@ fn asset_document(name: &str) -> Option<Response> {
     Some(document(content_type, contents))
 }
 
-async fn asset(
-    auth: Result<SessionAuthenticated, AppError>,
-    Path(name): Path<String>,
-) -> Response {
+async fn asset(auth: Result<SessionAuthenticated, AppError>, Path(name): Path<String>) -> Response {
     with_session(auth, || {
         asset_document(&name).unwrap_or_else(|| StatusCode::NOT_FOUND.into_response())
     })
@@ -123,13 +123,26 @@ mod tests {
 
     #[test]
     fn embedded_assets_have_strict_headers_and_an_exact_allowlist() {
-        for name in ["catalog.json", "readiness.mjs", "browser.mjs", "readiness.css"] {
+        for name in [
+            "catalog.json",
+            "readiness.mjs",
+            "browser.mjs",
+            "readiness.css",
+        ] {
             let response = asset_document(name).unwrap();
             assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
             assert_eq!(response.headers()[header::CONTENT_SECURITY_POLICY], CSP);
-            assert_eq!(response.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+            assert_eq!(
+                response.headers()[header::X_CONTENT_TYPE_OPTIONS],
+                "nosniff"
+            );
         }
-        for name in ["../Cargo.toml", "runtime-probe.mjs", "context.example.json", "unknown"] {
+        for name in [
+            "../Cargo.toml",
+            "runtime-probe.mjs",
+            "context.example.json",
+            "unknown",
+        ] {
             assert!(asset_document(name).is_none());
         }
         assert!(!CSP.contains("unsafe-inline"));
