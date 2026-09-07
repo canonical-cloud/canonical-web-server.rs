@@ -79,6 +79,7 @@ jobs:
               fi
               if [ -z "$listing" ]; then
                 printf 'missing required executable /%s in %s\n' "$member" "$image" >&2
+                rm -f -- "$archive"
                 return 1
               fi
               permissions=${listing%% *}
@@ -87,6 +88,7 @@ jobs:
                 *)
                   printf 'required file /%s is not executable in %s: %s\n' \
                     "$member" "$image" "$permissions" >&2
+                  rm -f -- "$archive"
                   return 1
                   ;;
               esac
@@ -98,13 +100,23 @@ jobs:
             local image=$1
             local app=$2
             local exposed_ports=$3
-            local expected_entrypoint
-            expected_entrypoint=$(jq -cn --arg app "$app" '["/ores-launcher", $app]')
+            local config
+            config=$(docker image inspect "$image")
 
-            test "$(docker image inspect "$image" --format '{{.Config.User}}')" = '65532:65532'
-            test "$(docker image inspect "$image" --format '{{json .Config.Entrypoint}}')" = "$expected_entrypoint"
-            test "$(docker image inspect "$image" --format '{{json .Config.Cmd}}')" = '[]'
-            test "$(docker image inspect "$image" --format '{{json .Config.ExposedPorts}}')" = "$exposed_ports"
+            if ! jq -e \
+              --arg app "$app" \
+              --argjson exposedPorts "$exposed_ports" \
+              '.[0].Config
+               | .User == "65532:65532"
+                 and .Entrypoint == ["/ores-launcher", $app]
+                 and ((.Cmd // []) == [])
+                 and .ExposedPorts == $exposedPorts' \
+              <<<"$config" >/dev/null; then
+              printf 'image metadata contract failed for %s\n' "$image" >&2
+              jq '.[0].Config | {User, Entrypoint, Cmd, ExposedPorts}' \
+                <<<"$config" >&2
+              return 1
+            fi
 
             assert_files_executable "$image" /ores-launcher "$app"
             bash docker/test-launcher-image.sh "$image" "$app"
