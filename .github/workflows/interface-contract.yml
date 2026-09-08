@@ -5,9 +5,12 @@ on:
     paths:
       - '.zpkg.toml'
       - '.zpkg/**'
+      - '.gitmodules'
+      - 'vendor/canonical-auditor-readiness'
       - 'contracts/interfaces-source.lock.json'
       - 'scripts/verify-interface-dependency.py'
       - 'src/routes/health.rs'
+      - 'src/routes/readiness.rs'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/interface-contract.yml'
@@ -30,6 +33,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+          submodules: true
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
