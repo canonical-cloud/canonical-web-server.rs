@@ -6,6 +6,10 @@ import {
   type OptoSyncClient,
 } from "@opto-sync/client/browser";
 import type htmx from "htmx.org";
+import {
+  QuoteDeliveryScheduler,
+  quoteDeliveryWakeSignals,
+} from "./quote-delivery-scheduler";
 
 const QUOTE_TABLE = "canonical_quote_intent";
 const RETRY_INTERVAL_MS = 15_000;
@@ -150,7 +154,6 @@ export async function wireQuoteOptimisticWrites(api: HtmxApi): Promise<QuoteWrit
 
   const queue = await QuoteWriteQueue.open(accountKey);
   let active: ActiveQuoteRequest | undefined;
-  let flushing = false;
 
   const renderRecord = (recordId: string, fields: QuoteFields, message: string, state: string): void => {
     let article = document.querySelector<HTMLElement>(`#quote-${recordId}`);
@@ -247,16 +250,11 @@ export async function wireQuoteOptimisticWrites(api: HtmxApi): Promise<QuoteWrit
   };
 
   const flush = async (): Promise<void> => {
-    if (flushing || !navigator.onLine) {
+    if (!navigator.onLine) {
       return;
     }
-    flushing = true;
-    try {
-      for (const mutation of await queue.pending()) {
-        await deliver(mutation);
-      }
-    } finally {
-      flushing = false;
+    for (const mutation of await queue.pending()) {
+      await deliver(mutation);
     }
   };
 
@@ -339,20 +337,24 @@ export async function wireQuoteOptimisticWrites(api: HtmxApi): Promise<QuoteWrit
     setStatus(status, "Delivery was interrupted; the local write remains queued.", "pending");
   });
 
-  window.addEventListener("online", () => void flush());
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {
-      void flush();
-    }
-  });
-  window.setInterval(() => void flush(), RETRY_INTERVAL_MS);
-
   await renderPending();
   if (submit !== null) {
     submit.disabled = false;
   }
   setStatus(status, "Optimistic writes are ready.", "synced");
-  void flush();
+  const scheduler = new QuoteDeliveryScheduler({
+    flush,
+    onFlushError: () =>
+      setStatus(status, "Delivery was interrupted; the local write remains queued.", "pending"),
+  });
+  scheduler.start(
+    quoteDeliveryWakeSignals({
+      onlineTarget: window,
+      visibilityTarget: document,
+      isVisible: () => document.visibilityState === "visible",
+      retryIntervalMs: RETRY_INTERVAL_MS,
+    }),
+  );
   return queue;
 }
 

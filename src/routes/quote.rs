@@ -6,7 +6,7 @@ use crate::{
 };
 use axum::{
     extract::{Path, State},
-    http::{HeaderMap, HeaderValue, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Redirect, Response},
     Form,
 };
@@ -19,11 +19,12 @@ const SHARED_AUTH_BROWSER_SIGN_IN_PATH: &str = "/shared-auth/auth/browser/sign-i
 
 pub async fn page(
     State(state): State<AppState>,
+    headers: HeaderMap,
     auth: Result<QuoteSessionAuthenticated, AppError>,
 ) -> Response {
     let actor = match auth {
         Ok(QuoteSessionAuthenticated(actor)) => actor,
-        Err(AppError::Unauthorized) => return shared_auth_redirect(&state).into_response(),
+        Err(AppError::Unauthorized) => return htmx_or_browser_auth_redirect(&headers, &state),
         Err(error) => return error.into_response(),
     };
     let Some(client) = state.quote_api.as_ref() else {
@@ -43,7 +44,7 @@ pub async fn detail(
 ) -> Response {
     let actor = match auth {
         Ok(QuoteSessionAuthenticated(actor)) => actor,
-        Err(AppError::Unauthorized) => return shared_auth_redirect(&state).into_response(),
+        Err(AppError::Unauthorized) => return htmx_or_browser_auth_redirect(&headers, &state),
         Err(error) => return error.into_response(),
     };
     let quote_id = match Uuid::parse_str(&raw_id) {
@@ -54,7 +55,7 @@ pub async fn detail(
         return AppError::ServiceUpstream.into_response();
     };
     match client.get(&actor, quote_id).await {
-        Ok(record) if headers.contains_key("hx-request") => {
+        Ok(record) if is_htmx_request(&headers) => {
             quote_api::quote_status_fragment(&record).into_response()
         }
         Ok(record) => quote_api::quote_detail_page(&actor, &record).into_response(),
@@ -89,7 +90,7 @@ pub async fn submit(
         return AppError::ServiceUpstream.into_response();
     };
     match client.create(&actor, &request, idempotency_key).await {
-        Ok(record) if headers.contains_key("hx-request") => {
+        Ok(record) if is_htmx_request(&headers) => {
             quote_api::quote_status_fragment(&record).into_response()
         }
         Ok(record) => Redirect::to(&format!("/u/quote/{}", record.id)).into_response(),
@@ -398,6 +399,7 @@ fn shared_auth_sign_in_url(app_base_url: &str) -> reqwest::Url {
         .expect("APP_BASE_URL was validated before application state construction");
     destination.set_path(SHARED_AUTH_BROWSER_SIGN_IN_PATH);
     destination.set_query(None);
+    destination.set_fragment(None);
     destination
         .query_pairs_mut()
         .append_pair("client_id", "canonical-web")
@@ -405,27 +407,47 @@ fn shared_auth_sign_in_url(app_base_url: &str) -> reqwest::Url {
     destination
 }
 
-fn shared_auth_redirect(state: &AppState) -> Redirect {
-    let destination = shared_auth_sign_in_url(&state.config.app_base_url);
-    Redirect::temporary(destination.as_str())
+// HX-Request selects a response representation only; authentication, Origin,
+// CSRF, and account ownership remain separate mandatory checks.
+fn is_htmx_request(headers: &HeaderMap) -> bool {
+    let values = headers.get_all("hx-request");
+    let mut values = values.iter();
+    let enabled = values.next().is_some_and(|value| value == "true");
+    enabled && values.next().is_none()
 }
 
 fn htmx_or_browser_auth_redirect(headers: &HeaderMap, state: &AppState) -> Response {
-    let destination = shared_auth_sign_in_url(&state.config.app_base_url);
-    if headers.contains_key("hx-request") {
+    auth_redirect_response(headers, &state.config.app_base_url)
+}
+
+fn auth_redirect_response(headers: &HeaderMap, app_base_url: &str) -> Response {
+    let destination = shared_auth_sign_in_url(app_base_url);
+    let mut response = if is_htmx_request(headers) {
+        // HTMX cannot process HX-Redirect on an ordinary 3xx response: the
+        // browser follows it first. Keep the denial and navigate the full page,
+        // rather than inserting a sign-in document into the quote fragment.
         let mut response = StatusCode::UNAUTHORIZED.into_response();
         if let Ok(value) = HeaderValue::from_str(destination.as_str()) {
             response.headers_mut().insert("hx-redirect", value);
         }
         response
+            .headers_mut()
+            .insert("hx-reswap", HeaderValue::from_static("none"));
+        response
     } else {
-        Redirect::temporary(destination.as_str()).into_response()
-    }
+        // A 303 deliberately changes an expired form submission to GET. A 307
+        // would replay the quote's POST body into the sign-in endpoint.
+        Redirect::to(destination.as_str()).into_response()
+    };
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 fn form_error(headers: &HeaderMap, message: &str) -> Response {
     let fragment = html! { p class="error" role="alert" { (message) } };
-    if headers.contains_key("hx-request") {
+    if is_htmx_request(headers) {
         let mut response = (StatusCode::UNPROCESSABLE_ENTITY, fragment).into_response();
         response
             .headers_mut()
@@ -528,5 +550,107 @@ mod tests {
                 .map(|(_, value)| value.into_owned()),
             Some("canonical-web".into())
         );
+    }
+
+    #[test]
+    fn expired_browser_submission_redirects_with_see_other_not_body_replay() {
+        let response = auth_redirect_response(&HeaderMap::new(), "https://app.canonical.plus");
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let location = response.headers()[header::LOCATION].to_str().unwrap();
+        assert_eq!(
+            location,
+            shared_auth_sign_in_url("https://app.canonical.plus").as_str()
+        );
+        assert!(!response.headers().contains_key("hx-redirect"));
+        assert!(!response.headers().contains_key("hx-reswap"));
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    }
+
+    #[test]
+    fn expired_htmx_request_denies_and_navigates_without_swapping_login_html() {
+        let mut headers = HeaderMap::new();
+        headers.insert("hx-request", HeaderValue::from_static("true"));
+        let response = auth_redirect_response(&headers, "https://app.canonical.plus");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response.headers()["hx-redirect"],
+            shared_auth_sign_in_url("https://app.canonical.plus").as_str()
+        );
+        assert_eq!(response.headers()["hx-reswap"], "none");
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        assert!(!response.headers().contains_key(header::LOCATION));
+    }
+
+    #[test]
+    fn htmx_representation_requires_one_exact_true_value() {
+        for value in ["false", "", "TRUE", " true ", "true,false"] {
+            let mut headers = HeaderMap::new();
+            headers.insert("hx-request", HeaderValue::from_str(value).unwrap());
+            assert!(!is_htmx_request(&headers));
+            assert_eq!(
+                auth_redirect_response(&headers, "https://app.canonical.plus").status(),
+                StatusCode::SEE_OTHER
+            );
+        }
+        let mut headers = HeaderMap::new();
+        headers.append("hx-request", HeaderValue::from_static("true"));
+        headers.append("hx-request", HeaderValue::from_static("true"));
+        assert!(!is_htmx_request(&headers));
+    }
+
+    #[test]
+    fn caller_headers_cannot_choose_the_sign_in_origin_or_return_path() {
+        let mut headers = HeaderMap::new();
+        headers.insert("hx-request", HeaderValue::from_static("true"));
+        for name in [
+            "host",
+            "x-forwarded-host",
+            "hx-current-url",
+            "hx-target",
+            "referer",
+        ] {
+            headers.insert(
+                name,
+                HeaderValue::from_static("https://evil.invalid/?code=synthetic"),
+            );
+        }
+        let response = auth_redirect_response(&headers, "https://app.canonical.plus");
+        let value = response.headers()["hx-redirect"].to_str().unwrap();
+        assert_eq!(
+            value,
+            shared_auth_sign_in_url("https://app.canonical.plus").as_str()
+        );
+        assert!(!value.contains("evil.invalid"));
+        assert!(!value.contains("synthetic"));
+    }
+
+    #[test]
+    fn sign_in_builder_removes_unrelated_query_and_fragment() {
+        let destination =
+            shared_auth_sign_in_url("https://app.canonical.plus/old?unrelated=synthetic#synthetic");
+        assert_eq!(destination.fragment(), None);
+        assert_eq!(destination.query_pairs().count(), 2);
+        assert!(!destination.as_str().contains("synthetic"));
+        assert_eq!(destination.path(), SHARED_AUTH_BROWSER_SIGN_IN_PATH);
+    }
+
+    #[tokio::test]
+    async fn expired_session_responses_never_echo_customer_content() {
+        for htmx in [false, true] {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::COOKIE,
+                HeaderValue::from_static("session=synthetic"),
+            );
+            if htmx {
+                headers.insert("hx-request", HeaderValue::from_static("true"));
+            }
+            let response = auth_redirect_response(&headers, "https://app.canonical.plus");
+            assert!(!response.headers().contains_key(header::SET_COOKIE));
+            let body = axum::body::to_bytes(response.into_body(), 1024)
+                .await
+                .unwrap();
+            assert!(body.is_empty());
+        }
     }
 }
