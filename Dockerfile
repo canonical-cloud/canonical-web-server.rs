@@ -1,5 +1,20 @@
 # syntax=docker/dockerfile:1
 
+# One reviewed launcher source pin, built for the target architecture.
+FROM rust:1.90-bookworm AS launcher-build
+WORKDIR /launcher-source
+COPY docker/ores-launcher.rev ./ores-launcher.rev
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,id=cargo-git,sharing=locked \
+    grep -Eq '^[0-9a-f]{40}$' ores-launcher.rev \
+    && test "$(wc -l < ores-launcher.rev)" -eq 1 \
+    && cargo install --locked \
+        --git https://github.com/ores-otel/ores.otel.log.git \
+        --rev "$(cat ores-launcher.rev)" \
+        --features launcher --bin ores-launcher --root /launcher \
+        oresoftware-next-loggers \
+    && strip /launcher/bin/ores-launcher
+
 FROM node:26-bookworm-slim@sha256:cd565714d4da3e84bfd341e31448f81d47c6362198f152345297c9c1154e6341 AS client-build
 WORKDIR /build
 COPY vendor/opto-sync-clients/ ./vendor/opto-sync-clients/
@@ -40,22 +55,27 @@ FROM gcr.io/distroless/cc-debian12:nonroot@sha256:adcd20c7b4c988b73cbfbddb26d2ee
 COPY --from=revoker-build --chown=65532:65532 \
     /build/canonical-web-server.rs/target/release/canonical-session-revoker \
     /usr/local/bin/canonical-session-revoker
+COPY --from=launcher-build --chmod=0555 /launcher/bin/ores-launcher /ores-launcher
 USER 65532:65532
-ENTRYPOINT ["/usr/local/bin/canonical-session-revoker"]
+ENTRYPOINT ["/ores-launcher", "/usr/local/bin/canonical-session-revoker"]
+CMD []
 
 FROM gcr.io/distroless/cc-debian12:nonroot@sha256:adcd20c7b4c988b73cbfbddb26d2eee574571e6d7c9ffea29b3821e0690efb77 AS api
 COPY --from=api-build --chown=65532:65532 \
     /build/canonical-web-server.rs/target/release/canonical-api-server \
     /usr/local/bin/canonical-api-server
+COPY --from=launcher-build --chmod=0555 /launcher/bin/ores-launcher /ores-launcher
 EXPOSE 8081
 USER 65532:65532
-ENTRYPOINT ["/usr/local/bin/canonical-api-server"]
+ENTRYPOINT ["/ores-launcher", "/usr/local/bin/canonical-api-server"]
+CMD []
 
 FROM gcr.io/distroless/cc-debian12:nonroot@sha256:adcd20c7b4c988b73cbfbddb26d2eee574571e6d7c9ffea29b3821e0690efb77 AS web
 COPY --from=web-build --chown=65532:65532 \
     /build/canonical-web-server.rs/target/release/canonical-web-server \
     /usr/local/bin/canonical-web-server
 COPY --from=client-build --chown=65532:65532 /build/client/dist /app/client
+COPY --from=launcher-build --chmod=0555 /launcher/bin/ores-launcher /ores-launcher
 ENV APP_ASSET_DIR=/app/client
 ENV STATIC_DIR=/app/static
 EXPOSE 8081
@@ -65,4 +85,5 @@ ENV OTEL_SERVICE_NAME=canonical-web-server \
     OTEL_EXPORTER_OTLP_ENDPOINT=http://dd-otel-collector.observability.svc.cluster.local:4318 \
     RUST_LOG=info
 # ores-sops: distroless has no shell — decrypt host-side (just env-docker-run / k8s Secret from env/enc). Do not bake plaintext or age keys into this image.
-ENTRYPOINT ["/usr/local/bin/canonical-web-server"]
+ENTRYPOINT ["/ores-launcher", "/usr/local/bin/canonical-web-server"]
+CMD []
