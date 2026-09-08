@@ -142,3 +142,173 @@ test("readiness: authenticated worksheets round-trip independently without uploa
   assert.deepEqual(errors, []);
   assert.deepEqual(writes, []);
 });
+
+async function openWorksheet(t) {
+  const result = await withPage(t);
+  result.page.setDefaultTimeout(10000);
+  await signIn(result.page, result.server);
+  await result.page.goto(`${result.server.url}/app/readiness/soc2`, { waitUntil: "networkidle" });
+  await start(result.page);
+  return result;
+}
+
+async function importWithDecision(page, packet, accept) {
+  const pendingDialog = page.waitForEvent("dialog");
+  const upload = importResponse(page, packet);
+  const dialog = await pendingDialog;
+  assert.equal(dialog.type(), "confirm");
+  assert.match(dialog.message(), /Replace this tab/);
+  if (accept) await dialog.accept();
+  else await dialog.dismiss();
+  await upload;
+  await page.waitForFunction(() => document.getElementById("workspace").getAttribute("aria-busy") === "false");
+}
+
+test("readiness: every field-only edit survives a cancelled replacement", async (t) => {
+  const { page, errors } = await openWorksheet(t);
+  const blank = JSON.parse(await downloadText(page, "#export-json"));
+  const fields = { status: "partial", owner: "Owner only", notes: "Explanation only", evidenceRef: "vault:e-001", evidenceDate: "2026-08-31", reviewer: "Reviewer only", dueDate: "2026-10-01" };
+  for (const [field, value] of Object.entries(fields)) {
+    const input = page.locator(`[id="soc2.q01-${field}"]`);
+    if (field === "status") await input.selectOption(value);
+    else await input.fill(value);
+    await importWithDecision(page, blank, false);
+    assert.equal(await input.inputValue(), value);
+    assert.equal(await input.isDisabled(), false);
+    if (field === "status") await input.selectOption("unanswered");
+    else await input.fill("");
+  }
+  await page.locator('[id="soc2.q01-owner"]').fill("Explicitly replace me");
+  await importWithDecision(page, blank, true);
+  assert.equal(await page.locator('[id="soc2.q01-owner"]').inputValue(), "");
+  assert.equal(await page.locator("#import").isDisabled(), false);
+  assert.deepEqual(errors, []);
+});
+
+test("readiness: overlapping file reads cannot replace the active import", async (t) => {
+  const { page, errors } = await openWorksheet(t);
+  const packet = JSON.parse(await downloadText(page, "#export-json"));
+  packet.answers[0].owner = "First import";
+  await page.evaluate(() => {
+    const original = File.prototype.arrayBuffer;
+    window.restoreReadinessFileReader = () => { File.prototype.arrayBuffer = original; };
+    window.readinessReadCount = 0;
+    File.prototype.arrayBuffer = function () {
+      window.readinessReadCount++;
+      if (this.name === "delayed.json") return new Promise((resolve) => {
+        window.finishReadinessRead = async () => resolve(await original.call(this));
+      });
+      if (this.name === "failure.json") return Promise.reject(new Error("PRIVATE_FILE_CANARY"));
+      return original.call(this);
+    };
+  });
+  await page.locator("#import").setInputFiles({ name: "delayed.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(packet)) });
+  await page.waitForFunction(() => document.getElementById("workspace").getAttribute("aria-busy") === "true");
+  assert.equal(await page.locator('[id="soc2.q01-owner"]').isDisabled(), true);
+  assert.equal(await page.locator("#export-json").isDisabled(), true);
+  const second = structuredClone(packet);
+  second.answers[0].owner = "Second import must not win";
+  // Deliberately bypass disabled UI controls to test the operation gate itself.
+  await page.evaluate((raw) => {
+    const input = document.getElementById("import"), transfer = new DataTransfer();
+    transfer.items.add(new File([raw], "second.json", { type: "application/json" }));
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, JSON.stringify(second));
+  assert.equal(await page.evaluate(() => window.readinessReadCount), 1);
+  await page.evaluate(() => window.finishReadinessRead());
+  await page.waitForFunction(() => document.getElementById("workspace").getAttribute("aria-busy") === "false");
+  assert.equal(await page.locator('[id="soc2.q01-owner"]').inputValue(), "First import");
+  await page.locator("#import").setInputFiles({ name: "failure.json", mimeType: "application/json", buffer: Buffer.from("{}") });
+  await page.waitForFunction(() => document.getElementById("error").textContent.includes("Unable to read draft file"));
+  assert.doesNotMatch(await page.locator("#error").textContent(), /PRIVATE_FILE_CANARY/);
+  assert.equal(await page.locator('[id="soc2.q01-owner"]').inputValue(), "First import");
+  assert.equal(await page.locator("#import").isDisabled(), false);
+  await page.evaluate(() => window.restoreReadinessFileReader());
+  await importWithDecision(page, second, true);
+  assert.equal(await page.locator('[id="soc2.q01-owner"]').inputValue(), "Second import must not win");
+  assert.deepEqual(errors, []);
+});
+
+test("readiness: malformed, oversized and ambiguous drafts preserve existing answers", async (t) => {
+  const { page, errors } = await openWorksheet(t);
+  const packet = JSON.parse(await downloadText(page, "#export-json"));
+  await page.locator('[id="soc2.q01-owner"]').fill("Keep existing owner");
+  const duplicate = JSON.stringify(packet).replace('"schemaVersion":', '"schemaVersion":"duplicate","schemaVersion":');
+  const unknown = structuredClone(packet);
+  unknown.answers[0].approved = true;
+  const inputs = [Buffer.from("x".repeat(1048577)), Buffer.from([0xff]), Buffer.from(duplicate), Buffer.from(JSON.stringify(unknown)), Buffer.from("{broken")];
+  for (const buffer of inputs) {
+    await page.locator("#import").setInputFiles({ name: "invalid.json", mimeType: "application/json", buffer });
+    await page.waitForFunction(() => {
+      const input = document.getElementById("import");
+      return !input.disabled && input.value === "" && document.getElementById("error").textContent.length > 0;
+    });
+    assert.equal(await page.locator('[id="soc2.q01-owner"]').inputValue(), "Keep existing owner");
+  }
+  await importWithDecision(page, packet, true);
+  assert.equal(await page.locator('[id="soc2.q01-owner"]').inputValue(), "");
+  assert.deepEqual(errors, []);
+});
+
+test("readiness: filtered views never truncate exports, workpapers or print coverage", async (t) => {
+  const { page, errors } = await openWorksheet(t);
+  const packet = JSON.parse(await downloadText(page, "#export-json"));
+  Object.assign(packet.answers[0], { status: "implemented", owner: "Owner", notes: "No evidence yet" });
+  Object.assign(packet.answers[1], { status: "partial", owner: "Owner", notes: "Gap", dueDate: "2026-09-01" });
+  Object.assign(packet.answers[2], { status: "missing", owner: "Owner", notes: "Gap", dueDate: "2026-10-01", reviewer: "UNVERIFIED_REVIEWER_CANARY" });
+  await importResponse(page, packet);
+  await page.waitForFunction(() => document.getElementById("summary").textContent.includes("Answered 3/10"));
+  for (const [view, count] of Object.entries({ all: 10, unanswered: 7, gaps: 2, evidence: 1, review: 2, overdue: 1 })) {
+    await page.locator("#question-view").selectOption(view);
+    assert.equal(await page.locator("#questions fieldset:visible").count(), count);
+    assert.match(await page.locator("#summary").textContent(), /Answered 3\/10/);
+  }
+  const exported = JSON.parse(await downloadText(page, "#export-json"));
+  assert.equal(exported.answers.length, 10);
+  assert.deepEqual(exported, packet);
+  const md = await downloadText(page, "#export-md");
+  assert.match(md, /soc2.q10/);
+  const workpaper = await downloadText(page, "#export-workpaper");
+  assert.equal((workpaper.match(/Assessor outcome: not assessed/g) ?? []).length, 10);
+  assert.equal((workpaper.match(/Independent review: pending/g) ?? []).length, 10);
+  assert.doesNotMatch(workpaper, /UNVERIFIED_REVIEWER_CANARY|Assessor outcome: pass/);
+  assert.match(workpaper, /completeness reconciliation/);
+  assert.match(workpaper, /Retest evidence/);
+  await page.emulateMedia({ media: "print" });
+  assert.equal(await page.locator("#questions fieldset:visible").count(), 10);
+  await page.emulateMedia({ media: "screen" });
+  assert.equal(await page.locator("#questions fieldset:visible").count(), 1);
+  assert.deepEqual(errors, []);
+});
+
+test("readiness: invalid native fields block export without stale summaries or focus loss", async (t) => {
+  const { page, errors } = await openWorksheet(t);
+  const downloads = [];
+  page.on("download", (download) => downloads.push(download.suggestedFilename()));
+  await page.locator('[id="soc2.q01-status"]').selectOption("implemented");
+  const date = page.locator('[id="soc2.q01-evidenceDate"]');
+  await date.fill("2026-09-08");
+  assert.equal(await date.evaluate((input) => input.validity.rangeOverflow), true);
+  assert.equal(await page.evaluate(() => document.activeElement.id), "soc2.q01-evidenceDate");
+  assert.match(await page.locator("#summary").textContent(), /no current summary/);
+  await page.locator("#export-json").click();
+  assert.equal(await page.evaluate(() => document.activeElement.id), "error");
+  assert.deepEqual(downloads, []);
+  await date.fill("2026-08-31");
+  await page.locator("#question-view").selectOption("evidence");
+  const reference = page.locator('[id="soc2.q01-evidenceRef"]');
+  await reference.fill("https://example.invalid/private");
+  assert.equal(await reference.evaluate((input) => input.validity.patternMismatch), true);
+  assert.equal(await reference.getAttribute("aria-invalid"), "true");
+  assert.equal(await page.evaluate(() => document.activeElement.id), "soc2.q01-evidenceRef");
+  assert.equal(await page.locator("#questions fieldset:visible").count(), 10);
+  await page.locator("#export-workpaper").click();
+  assert.deepEqual(downloads, []);
+  await reference.fill("vault:e-001");
+  assert.equal(await page.locator("#error").textContent(), "");
+  assert.match(await page.locator("#summary").textContent(), /Answered 1\/10/);
+  const output = JSON.parse(await downloadText(page, "#export-json"));
+  assert.equal(output.answers[0].evidenceRef, "vault:e-001");
+  assert.deepEqual(errors, []);
+});
