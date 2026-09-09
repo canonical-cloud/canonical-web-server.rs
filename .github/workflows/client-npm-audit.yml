@@ -29,6 +29,5 @@ jobs:
           cache-dependency-path: client/package-lock.json
       - name: Install exact client lockfile
         run: npm ci --prefix client
-      - name: Fail closed on moderate-or-higher client advisories
-        working-directory: client
-        run: npm audit --omit=dev --audit-level=moderate
+      - name: Fail closed on production advisories and report bounded dev-only evidence
+        run: node client/scripts/report-npm-audit.mjs
