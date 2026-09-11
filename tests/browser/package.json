@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Puppeteer + Playwright end-to-end tests that drive the axum server in a real browser.",
   "scripts": {
-    "test:browser": "node --test --test-concurrency=1 --test-timeout=120000 app-playwright.test.mjs app-puppeteer.test.mjs auth-hardening-playwright.test.mjs",
+    "test:browser": "node --test --test-concurrency=1 --test-timeout=120000 app-playwright.test.mjs app-puppeteer.test.mjs auth-hardening-playwright.test.mjs readiness-playwright.test.mjs readiness-timeout-playwright.test.mjs",
     "lint:ores": "if [ -f ../../.ores-lint/lint.sh ]; then sh ../../.ores-lint/lint.sh; else echo 'ores-lint not installed'; fi",
     "prepublishOnly": "npm run lint:ores"
   },

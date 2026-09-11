@@ -2,6 +2,7 @@ mod auth;
 mod health;
 mod pages;
 mod quote;
+mod readiness;
 mod websocket;
 
 pub mod api;
@@ -48,7 +49,7 @@ pub fn router(state: AppState) -> Router {
         .merge(quote_form)
         .nest("/api", api::router())
         .nest("/auth", auth::router())
-        .nest("/app", pages::router())
+        .nest("/app", pages::router().merge(readiness::router()))
         // These responses can contain identity, CSRF tokens, or customer
         // records. Keep them out of browser and shared intermediary caches;
         // static application assets and the marketing fallback stay outside
