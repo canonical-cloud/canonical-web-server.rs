@@ -9,9 +9,11 @@ on:
       - Cargo.lock
       - client/**
       - crates/**
+      - docker/**
       - migrations/**
       - src/**
       - tests/release-boundary.mjs
+      - vendor/**
   push:
     branches: [main]
     paths:
@@ -21,9 +23,11 @@ on:
       - Cargo.lock
       - client/**
       - crates/**
+      - docker/**
       - migrations/**
       - src/**
       - tests/release-boundary.mjs
+      - vendor/**
   workflow_dispatch:
 
 permissions:
@@ -54,15 +58,79 @@ jobs:
           docker build --pull --target api --tag canonical-api-server:pr .
           docker build --pull --target revoker --tag canonical-session-revoker:pr .
 
-      - name: Verify non-root image users and entrypoints
+      - name: Verify non-root launcher image contracts
+        shell: bash
         run: |
           set -euo pipefail
-          test "$(docker image inspect canonical-web-server:pr --format '{{.Config.User}}')" = '65532:65532'
-          test "$(docker image inspect canonical-api-server:pr --format '{{.Config.User}}')" = '65532:65532'
-          test "$(docker image inspect canonical-session-revoker:pr --format '{{.Config.User}}')" = '65532:65532'
-          test "$(docker image inspect canonical-web-server:pr --format '{{json .Config.Entrypoint}}')" = '["/usr/local/bin/canonical-web-server"]'
-          test "$(docker image inspect canonical-api-server:pr --format '{{json .Config.Entrypoint}}')" = '["/usr/local/bin/canonical-api-server"]'
-          test "$(docker image inspect canonical-session-revoker:pr --format '{{json .Config.Entrypoint}}')" = '["/usr/local/bin/canonical-session-revoker"]'
-          test "$(docker image inspect canonical-web-server:pr --format '{{json .Config.ExposedPorts}}')" = '{"8081/tcp":{}}'
-          test "$(docker image inspect canonical-api-server:pr --format '{{json .Config.ExposedPorts}}')" = '{"8081/tcp":{}}'
-          test "$(docker image inspect canonical-session-revoker:pr --format '{{json .Config.ExposedPorts}}')" = 'null'
+
+          assert_files_executable() {
+            local image=$1
+            shift
+            local container archive member permissions listing
+            container=$(docker create "$image")
+            archive=$(mktemp)
+            docker export "$container" >"$archive"
+            docker rm "$container" >/dev/null
+            for member in "$@"; do
+              member=${member#/}
+              listing=$(tar -tvf "$archive" "$member" 2>/dev/null || true)
+              if [ -z "$listing" ]; then
+                listing=$(tar -tvf "$archive" "./$member" 2>/dev/null || true)
+              fi
+              if [ -z "$listing" ]; then
+                printf 'missing required executable /%s in %s\n' "$member" "$image" >&2
+                rm -f -- "$archive"
+                return 1
+              fi
+              permissions=${listing%% *}
+              case "$permissions" in
+                *x*) ;;
+                *)
+                  printf 'required file /%s is not executable in %s: %s\n' \
+                    "$member" "$image" "$permissions" >&2
+                  rm -f -- "$archive"
+                  return 1
+                  ;;
+              esac
+            done
+            rm -f -- "$archive"
+          }
+
+          assert_contract() {
+            local image=$1
+            local app=$2
+            local exposed_ports=$3
+            local config
+            config=$(docker image inspect "$image")
+
+            if ! jq -e \
+              --arg app "$app" \
+              --argjson exposedPorts "$exposed_ports" \
+              '.[0].Config
+               | .User == "65532:65532"
+                 and .Entrypoint == ["/ores-launcher", $app]
+                 and ((.Cmd // []) == [])
+                 and .ExposedPorts == $exposedPorts' \
+              <<<"$config" >/dev/null; then
+              printf 'image metadata contract failed for %s\n' "$image" >&2
+              jq '.[0].Config | {User, Entrypoint, Cmd, ExposedPorts}' \
+                <<<"$config" >&2
+              return 1
+            fi
+
+            assert_files_executable "$image" /ores-launcher "$app"
+            bash docker/test-launcher-image.sh "$image" "$app"
+          }
+
+          assert_contract \
+            canonical-web-server:pr \
+            /usr/local/bin/canonical-web-server \
+            '{"8081/tcp":{}}'
+          assert_contract \
+            canonical-api-server:pr \
+            /usr/local/bin/canonical-api-server \
+            '{"8081/tcp":{}}'
+          assert_contract \
+            canonical-session-revoker:pr \
+            /usr/local/bin/canonical-session-revoker \
+            'null'
