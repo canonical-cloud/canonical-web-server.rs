@@ -6,6 +6,8 @@ description = "Canonical authenticated Maud/Axum/HTMX application server"
 license = "MIT"
 keywords = ["web", "axum", "maud", "htmx", "seaorm", "websocket"]
 language = "rust"
+role = "server"
+family = "canonical"
 
 [package.repository]
 vcs = "git"

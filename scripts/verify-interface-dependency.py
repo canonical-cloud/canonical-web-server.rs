@@ -66,6 +66,13 @@ def main() -> None:
     if cargo_dep.get("git") != repository or cargo_dep.get("rev") != revision:
         fail("Cargo interface source does not match the reviewed interface lock")
 
+    # The lockfile must resolve the crate at exactly the reviewed revision, not just declare it.
+    cargo_lock = (ROOT / "Cargo.lock").read_text(encoding="utf-8")
+    if f'name = "{crate}"' not in cargo_lock:
+        fail(f"Cargo.lock does not contain {crate}")
+    if revision not in cargo_lock:
+        fail("Cargo.lock does not resolve the exact reviewed interface revision")
+
     lifecycle = zpkg.get("lifecycle", {})
     for phase in ("pre-build", "pre-publish"):
         config = lifecycle.get(phase)
