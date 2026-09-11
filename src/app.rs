@@ -40,6 +40,10 @@ pub struct AppState {
     pub sessions: auth::SessionService,
     pub shared_auth: auth::SharedAuthVerifier,
     pub(crate) quote_api: Option<Arc<crate::quote_api::QuoteApiClient>>,
+    /// Anonymous browser intake crosses the same P2 service boundary as quote
+    /// traffic but uses a distinct, write-only client surface. It never gains
+    /// access to the web database or authenticated quote methods.
+    pub(crate) pre_interest_api: Option<Arc<crate::pre_interest_api::PreInterestApiClient>>,
     pub hub: ws::Hub,
     pub(crate) bearer_auth_semaphore: Arc<Semaphore>,
 }
@@ -78,6 +82,7 @@ impl AppState {
             sessions,
             shared_auth,
             quote_api: None,
+            pre_interest_api: None,
             hub: ws::Hub::new(256),
             bearer_auth_semaphore,
         })
@@ -98,6 +103,9 @@ pub async fn build_state(config: Config) -> Result<AppState, AppError> {
         state.quote_api = crate::quote_api::QuoteApiClient::from_env()
             .ok()
             .map(Arc::new);
+        state.pre_interest_api = crate::pre_interest_api::PreInterestApiClient::from_env()
+            .ok()
+            .map(Arc::new);
         return Ok(state);
     }
 
@@ -107,6 +115,9 @@ pub async fn build_state(config: Config) -> Result<AppState, AppError> {
     )?);
     let mut state = AppState::new(config, db, auth)?;
     state.quote_api = Some(Arc::new(crate::quote_api::QuoteApiClient::from_env()?));
+    state.pre_interest_api = Some(Arc::new(
+        crate::pre_interest_api::PreInterestApiClient::from_env()?,
+    ));
     Ok(state)
 }
 

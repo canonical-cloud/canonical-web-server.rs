@@ -40,7 +40,9 @@ impl EdgeAuthVerifier {
         })
     }
 
-    fn verify(&self, supplied: &str) -> bool {
+    /// Verifies the edge-to-origin secret without granting any identity by
+    /// itself. Callers must separately validate every forwarded classification.
+    pub(crate) fn verify(&self, supplied: &str) -> bool {
         let Some(expected) = self.expected_hash else {
             return false;
         };
@@ -52,7 +54,7 @@ impl EdgeAuthVerifier {
     }
 
     #[cfg(test)]
-    fn for_test(secret: &str) -> Self {
+    pub(crate) fn for_test(secret: &str) -> Self {
         Self {
             expected_hash: Some(Sha256::digest(secret.as_bytes()).into()),
         }
