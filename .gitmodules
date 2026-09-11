@@ -1,0 +1,6 @@
+[submodule "vendor/opto-sync-clients"]
+	path = vendor/opto-sync-clients
+	url = https://github.com/opto-sync/opto-sync-clients.git
+[submodule "vendor/canonical-auditor-readiness"]
+	path = vendor/canonical-auditor-readiness
+	url = https://github.com/canonical-cloud/canonical-company-auditor.rs.git

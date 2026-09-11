@@ -8,6 +8,7 @@ pub mod command;
 pub mod database;
 pub mod env_compat;
 pub mod error;
+pub mod integrations;
 pub mod metrics;
 pub mod quote_api;
 pub mod routes;

@@ -233,6 +233,44 @@ pub async fn begin_user_transaction(
     Ok(transaction)
 }
 
+/// Starts an RLS transaction for an identity verified by the Canonical
+/// Cloudflare Worker against Shared Auth ES256 keys.
+///
+/// The subject is opaque by design and can therefore represent local Shared
+/// Auth accounts or any bounded upstream provider identity. It is installed in
+/// a separate PostgreSQL setting so a Shared Auth subject can never be confused
+/// with Supabase's UUID-based `auth.uid()` contract.
+pub async fn begin_shared_auth_transaction(
+    db: &DatabaseConnection,
+    subject: &str,
+) -> Result<DatabaseTransaction, DbErr> {
+    if subject.is_empty()
+        || subject.len() > 512
+        || subject.trim() != subject
+        || subject.chars().any(char::is_control)
+    {
+        return Err(DbErr::Custom("invalid Shared Auth subject".into()));
+    }
+
+    let transaction = db.begin().await?;
+    if db.get_database_backend() == DatabaseBackend::Postgres {
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                r#"
+                SELECT
+                  set_config('canonical.shared_auth_sub', $1, true),
+                  set_config('request.jwt.claims', '{}', true),
+                  set_config('request.jwt.claim.sub', '', true),
+                  set_config('request.jwt.claim.role', 'authenticated', true)
+                "#,
+                [subject.to_owned().into()],
+            ))
+            .await?;
+    }
+    Ok(transaction)
+}
+
 /// Starts a narrowly scoped session-revocation transaction.
 ///
 /// PostgreSQL callers must connect through `canonical_session_revoker`; using
@@ -311,8 +349,8 @@ pub async fn begin_admin_transaction(
 #[cfg(test)]
 mod tests {
     use super::{
-        begin_admin_transaction, begin_session_revocation_transaction, database_now,
-        verify_runtime_database_role, AssuranceLevel,
+        begin_admin_transaction, begin_session_revocation_transaction,
+        begin_shared_auth_transaction, database_now, verify_runtime_database_role, AssuranceLevel,
     };
     use sea_orm::{prelude::DateTimeUtc, Database};
     use std::time::SystemTime;
@@ -324,6 +362,23 @@ mod tests {
         verify_runtime_database_role(&db).await.unwrap();
         let transaction = begin_session_revocation_transaction(&db).await.unwrap();
         transaction.commit().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn shared_auth_subject_is_validated_before_opening_a_transaction() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let transaction = begin_shared_auth_transaction(&db, "canonical:customer:123")
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
+        assert!(
+            begin_shared_auth_transaction(&db, " canonical:customer:123")
+                .await
+                .is_err()
+        );
+        assert!(begin_shared_auth_transaction(&db, "canonical\nsubject")
+            .await
+            .is_err());
     }
 
     #[tokio::test]

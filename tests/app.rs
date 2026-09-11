@@ -741,16 +741,16 @@ async fn application_and_marketing_routes_receive_tailored_security_headers() {
         .oneshot(Request::get("/login").body(Body::empty()).unwrap())
         .await
         .unwrap();
-    assert!(app_page
-        .headers()
-        .contains_key(header::CONTENT_SECURITY_POLICY));
-    assert!(app_page
+    let app_csp = app_page
         .headers()
         .get(header::CONTENT_SECURITY_POLICY)
         .unwrap()
         .to_str()
-        .unwrap()
-        .contains("ws://localhost:8081"));
+        .unwrap();
+    assert!(app_csp.contains("ws://localhost:8081"));
+    assert!(app_csp.contains("script-src 'self'"));
+    assert!(!app_csp.contains("'wasm-unsafe-eval'"));
+    assert!(!app_csp.contains("'unsafe-eval'"));
     assert_eq!(
         app_page.headers().get(header::X_FRAME_OPTIONS).unwrap(),
         "DENY"
@@ -770,6 +770,39 @@ async fn application_and_marketing_routes_receive_tailored_security_headers() {
         app_page.headers().get(header::CACHE_CONTROL).unwrap(),
         "no-store"
     );
+
+    let quote_form = app
+        .clone()
+        .oneshot(Request::get("/u/quote").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let quote_csp = quote_form
+        .headers()
+        .get(header::CONTENT_SECURITY_POLICY)
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(quote_csp.contains("script-src 'self' 'wasm-unsafe-eval'"));
+    assert!(!quote_csp.contains("'unsafe-eval'"));
+
+    let quote_detail = app
+        .clone()
+        .oneshot(
+            Request::get("/u/quote/00000000-0000-4000-8000-000000000000")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let quote_detail_csp = quote_detail
+        .headers()
+        .get(header::CONTENT_SECURITY_POLICY)
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(quote_detail_csp.contains("script-src 'self'"));
+    assert!(!quote_detail_csp.contains("'wasm-unsafe-eval'"));
+    assert!(!quote_detail_csp.contains("'unsafe-eval'"));
 
     let private_api = app
         .clone()
@@ -799,6 +832,8 @@ async fn application_and_marketing_routes_receive_tailored_security_headers() {
     assert!(marketing_csp.contains("frame-ancestors 'none'"));
     assert!(marketing_csp.contains("script-src 'self'"));
     assert!(!marketing_csp.contains("script-src 'self' 'unsafe-inline'"));
+    assert!(!marketing_csp.contains("'wasm-unsafe-eval'"));
+    assert!(!marketing_csp.contains("'unsafe-eval'"));
     assert_eq!(
         marketing_fallback
             .headers()

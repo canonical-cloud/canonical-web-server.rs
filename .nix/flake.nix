@@ -23,6 +23,10 @@
         {
           default = pkgs.mkShell {
             packages = with pkgs; [
+              # encrypted env files — env/enc/*.env.enc, see env/README.md
+              sops
+              age
+              python3
               rustc
               cargo
               rustfmt

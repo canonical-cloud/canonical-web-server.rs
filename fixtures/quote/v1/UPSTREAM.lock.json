@@ -1,0 +1,14 @@
+{
+  "repository": "canonical-cloud/canonical-interfaces",
+  "fixtureCommit": "c4944fcb1a35fae99a76897a0fedf37263fd11ad",
+  "schemaCommit": "ec2c739092c955e4756d2d692ef225adf67647e4",
+  "directory": "fixtures/quote/v1",
+  "files": {
+    "manifest.json": "f055969fefe020e89562c5c74c1e31cffc5e43be",
+    "request.json": "fe8bf1ad08a7152d44ead22ee0d082842d28b208",
+    "submission-response.json": "413c11dc9092f42beec34cbfa93b0cdafc604665",
+    "estimate.json": "b05e342af21dd0187510ae8155448252c890f6af",
+    "status-event.json": "ef2c5a6b143ad596a133f71d120e83091ddcb810",
+    "problem.json": "96166c2ab6dccfcb62fb3ce30aca436ce3fc59cc"
+  }
+}
