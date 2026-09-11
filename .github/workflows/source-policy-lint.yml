@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Check out caller repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -42,16 +42,16 @@ jobs:
 
       - name: Check out immutable policy implementation
         if: steps.languages.outputs.ecmascript == 'true' || steps.languages.outputs.rust == 'true'
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ores-otel/.github
-          ref: ed4a422095cbee47e115201d111a5dfbc17b5e89
+          ref: c417efc488bb4ca84e078fad9626f55b374913dd
           path: .source-policy
           persist-credentials: false
 
       - name: Set up Node.js
         if: steps.languages.outputs.ecmascript == 'true'
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
@@ -62,7 +62,7 @@ jobs:
         shell: bash
         run: npm ci --ignore-scripts --prefix .source-policy/tools/ecmascript-lint
 
-      - name: Lint ECMAScript semicolon policy
+      - name: Lint ECMAScript source policy
         if: steps.languages.outputs.ecmascript == 'true'
         shell: bash
         run: node .source-policy/tools/ecmascript-lint/lint.mjs "$GITHUB_WORKSPACE"
@@ -72,7 +72,7 @@ jobs:
         shell: bash
         run: rustup toolchain install 1.88.0 --profile minimal --no-self-update
 
-      - name: Lint Rust explicit-return policy
+      - name: Lint Rust source policy
         if: steps.languages.outputs.rust == 'true'
         shell: bash
         env:

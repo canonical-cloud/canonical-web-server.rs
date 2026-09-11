@@ -23,6 +23,9 @@ temp
 tmp/worktrees
 temp/worktrees
 
+# Generated TypeSpec/JSON Schema parity evidence; authorities live in the pinned auditor source.
+.typespec-json-schema-validator/
+
 # --- environment / secrets (sops + age) -------------------------------------
 # Only env/enc/*.env.enc is tracked. Every plaintext form stays out of git;
 # `just env-check` enforces it. See env/README.md.
@@ -35,3 +38,7 @@ env/dec/
 *.age-key
 keys.txt
 sops-private*.txt
+
+# python bytecode from the vendored ridl gate
+__pycache__/
+*.pyc
