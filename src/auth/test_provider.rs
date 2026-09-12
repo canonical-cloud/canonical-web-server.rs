@@ -24,7 +24,7 @@ pub(crate) struct BrowserTestAuth;
 
 impl BrowserTestAuth {
     pub(crate) fn is_enabled() -> bool {
-        std::env::var(ENABLE_ENV).as_deref() == Ok("1")
+        crate::config::flags::var(ENABLE_ENV).as_deref() == Ok("1")
     }
 
     fn user() -> SupabaseUser {

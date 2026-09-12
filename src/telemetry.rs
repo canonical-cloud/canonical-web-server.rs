@@ -68,13 +68,16 @@ impl Drop for TelemetryGuard {
 /// Exporter configuration fails open to logs-only telemetry. Endpoint details
 /// are never printed because OTLP URLs and headers can carry credentials.
 pub fn init(service_name: &'static str, service_namespace: &'static str) -> TelemetryGuard {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        EnvFilter::new(
-            "canonical_web_server=info,tower_http=info,hyper=warn,h2=warn,reqwest=warn,sea_orm=warn",
-        )
-    });
+    let filter = canonical_config::flags::var("RUST_LOG").ok().map_or_else(
+        || {
+            EnvFilter::new(
+                "canonical_web_server=info,tower_http=info,hyper=warn,h2=warn,reqwest=warn,sea_orm=warn",
+            )
+        },
+        EnvFilter::new,
+    );
     let resource = resource(service_name, service_namespace);
-    let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+    let endpoint = canonical_config::flags::var("OTEL_EXPORTER_OTLP_ENDPOINT")
         .ok()
         .filter(|value| !value.trim().is_empty());
 
@@ -186,7 +189,7 @@ fn resource(service_name: &str, service_namespace: &str) -> Resource {
     push_env_attribute(&mut attributes, "NODE_NAME", "k8s.node.name");
     push_env_attribute(&mut attributes, "HOSTNAME", "host.name");
 
-    if let Ok(raw) = std::env::var("OTEL_RESOURCE_ATTRIBUTES") {
+    if let Ok(raw) = canonical_config::flags::var("OTEL_RESOURCE_ATTRIBUTES") {
         attributes
             .extend(resource_attribute_pairs(&raw).map(|(key, value)| KeyValue::new(key, value)));
     }
@@ -196,7 +199,7 @@ fn resource(service_name: &str, service_namespace: &str) -> Resource {
 }
 
 fn push_env_attribute(attributes: &mut Vec<KeyValue>, env_name: &str, key: &'static str) {
-    if let Ok(value) = std::env::var(env_name) {
+    if let Ok(value) = canonical_config::flags::var(env_name) {
         let value = value.trim();
         if valid_attribute_value(value) {
             attributes.push(KeyValue::new(key, value.to_string()));

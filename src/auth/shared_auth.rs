@@ -1,4 +1,4 @@
-use std::{env, time::Duration};
+use std::time::Duration;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{TimeZone as _, Utc};
@@ -38,7 +38,7 @@ impl SharedAuthVerifier {
         } else {
             DEFAULT_LOOPBACK_COOKIE
         };
-        let cookie_name = env::var("SHARED_AUTH_BROWSER_COOKIE_NAME")
+        let cookie_name = crate::config::flags::var("SHARED_AUTH_BROWSER_COOKIE_NAME")
             .unwrap_or_else(|_| default_cookie.to_owned());
         validate_cookie_name(&cookie_name, config.cookie_secure)?;
 
@@ -47,7 +47,7 @@ impl SharedAuthVerifier {
             config.app_base_url.trim_end_matches('/'),
             VERIFY_PATH
         );
-        let verify_url = env::var("SHARED_AUTH_VERIFY_URL")
+        let verify_url = crate::config::flags::var("SHARED_AUTH_VERIFY_URL")
             .unwrap_or(default_verify_url)
             .parse::<Url>()
             .map_err(|_| {
