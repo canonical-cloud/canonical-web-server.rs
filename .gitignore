@@ -1,4 +1,7 @@
 /target
+/.zed/
+/.vendor/.zed/
+/zed_modules/
 .DS_Store
 *.log
 .env
@@ -35,3 +38,7 @@ env/dec/
 *.age-key
 keys.txt
 sops-private*.txt
+
+# python bytecode from the vendored ridl gate
+__pycache__/
+*.pyc

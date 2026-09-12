@@ -1,3 +1,5 @@
+pub mod four_transports;
+pub mod web_api_plane;
 #[cfg(all(feature = "test-auth", not(debug_assertions)))]
 compile_error!("the test-auth feature is forbidden in release builds");
 
@@ -5,6 +7,7 @@ pub mod api_server;
 pub mod app;
 pub mod auth;
 pub mod command;
+pub mod data_plane;
 pub mod database;
 pub mod env_compat;
 pub mod error;

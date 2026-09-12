@@ -5,12 +5,15 @@
 //! OpenTelemetry Collector; the cluster collector exposes those metrics to
 //! Prometheus. No runtime APIs or framework internals are patched.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use axum::{
     extract::MatchedPath,
     http::{Request, Response},
     Router,
+};
+use next_loggers::{
+    json, JsonObject, LogLevel, LogRecord, Logger, LoggerError, Options, Transport,
 };
 use opentelemetry::{
     global,
@@ -35,12 +38,16 @@ const EXPORT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Owns SDK providers so their final batches are flushed during shutdown.
 pub struct TelemetryGuard {
+    ores_logger: Logger,
     tracer_provider: Option<SdkTracerProvider>,
     meter_provider: Option<SdkMeterProvider>,
 }
 
 impl Drop for TelemetryGuard {
     fn drop(&mut self) {
+        if self.ores_logger.close().is_err() {
+            eprintln!("telemetry: Ores logger shutdown failed; final records may be incomplete");
+        }
         let tracer_provider = self.tracer_provider.take();
         let meter_provider = self.meter_provider.take();
         if tracer_provider.is_none() && meter_provider.is_none() {
@@ -95,6 +102,7 @@ pub fn init(service_name: &'static str, service_namespace: &'static str) -> Tele
 
     global::set_text_map_propagator(TraceContextPropagator::new());
     install_subscriber(filter, tracer);
+    let ores_logger = ores_logger(service_name);
     tracing::info!(
         service.name = service_name,
         service.namespace = service_namespace,
@@ -103,8 +111,17 @@ pub fn init(service_name: &'static str, service_namespace: &'static str) -> Tele
         log.stream = "stdout",
         "web telemetry initialized"
     );
+    let _ = ores_logger
+        .info(vec![json!("telemetry initialized")])
+        .add_fields(JsonObject::from_iter([
+            ("service.name".to_owned(), json!(service_name)),
+            ("service.namespace".to_owned(), json!(service_namespace)),
+            ("log.destination".to_owned(), json!("tracing-bridge")),
+        ]))
+        .send();
 
     TelemetryGuard {
+        ores_logger,
         tracer_provider,
         meter_provider,
     }
@@ -172,6 +189,39 @@ where
         .with_span_list(true)
         .with_target(true)
         .with_writer(std::io::stdout)
+}
+
+struct TracingBridgeTransport;
+
+impl Transport for TracingBridgeTransport {
+    fn write(&self, record: &LogRecord) -> Result<(), LoggerError> {
+        let encoded = record.to_json()?;
+        match record.level {
+            LogLevel::Trace => tracing::trace!(ores.record = %encoded, "Ores structured log"),
+            LogLevel::Debug => tracing::debug!(ores.record = %encoded, "Ores structured log"),
+            LogLevel::Info => tracing::info!(ores.record = %encoded, "Ores structured log"),
+            LogLevel::Warn => tracing::warn!(ores.record = %encoded, "Ores structured log"),
+            LogLevel::Error => tracing::error!(ores.record = %encoded, "Ores structured log"),
+            LogLevel::Fatal => {
+                tracing::error!(ores.record = %encoded, "Ores fatal structured log")
+            }
+        }
+        Ok(())
+    }
+
+    fn is_open_telemetry(&self) -> bool {
+        true
+    }
+}
+
+fn ores_logger(service_name: &str) -> Logger {
+    Logger::new(Options {
+        app_name: service_name.to_owned(),
+        name: Some("server".to_owned()),
+        console: false,
+        transports: vec![Arc::new(TracingBridgeTransport)],
+        ..Options::default()
+    })
 }
 
 fn resource(service_name: &str, service_namespace: &str) -> Resource {
