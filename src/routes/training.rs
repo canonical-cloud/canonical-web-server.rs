@@ -254,7 +254,9 @@ mod tests {
         assert!(rendered.contains("Start your readiness assessment"));
         assert!(rendered.contains("Talk to an expert"));
         assert!(rendered.contains("Readiness, not assurance."));
-        assert!(rendered.contains("does not issue audit opinions, certifications, approvals, or guaranteed outcomes"));
+        assert!(rendered.contains(
+            "does not issue audit opinions, certifications, approvals, or guaranteed outcomes"
+        ));
         assert!(!rendered.contains("85% faster"));
         assert!(!rendered.contains("guaranteed clean"));
     }
@@ -270,7 +272,10 @@ mod tests {
             response.headers()[header::CACHE_CONTROL],
             TRAINING_CACHE_CONTROL
         );
-        assert_eq!(response.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+        assert_eq!(
+            response.headers()[header::X_CONTENT_TYPE_OPTIONS],
+            "nosniff"
+        );
         assert!(!TRAINING_CSP.contains("unsafe-eval"));
         assert!(!TRAINING_CSP.contains("script-src"));
     }
