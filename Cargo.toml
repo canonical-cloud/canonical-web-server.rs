@@ -61,6 +61,9 @@ tracing-opentelemetry = "0.33"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "json"] }
 uuid = { version = "1.23.0", features = ["serde", "v4"] }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ores-otel-web = { git = "https://github.com/ores-otel/ores.otel.log", rev = "74bc1c421f5a56be28cade1a47f5d45de51f3b4b", default-features = false, features = ["axum"] }
+
 [dev-dependencies]
 # Router-level tests drive the app with `oneshot` and read the response body
 # without binding a socket.
