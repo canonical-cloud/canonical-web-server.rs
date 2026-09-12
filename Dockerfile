@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # One reviewed launcher source pin, built for the target architecture.
-FROM rust:1.90-bookworm AS launcher-build
+FROM rust:1.98-bookworm AS launcher-build
 WORKDIR /launcher-source
 COPY docker/ores-launcher.rev ./ores-launcher.rev
 RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry,sharing=locked \
@@ -24,7 +24,7 @@ RUN npm ci
 COPY client/ ./
 RUN npm run typecheck && npm test && npm run build
 
-FROM rust:1.98-slim-bookworm@sha256:1469a27c125cb5a3aebfa4f4e4665d935b02fb72cc093b2c974b3d740e43f157 AS rust-base
+FROM rust:1.98-slim-bookworm@sha256:ebd900bae66fd508b466cef82d64a83a5fb34682e4c8b2797a42908bddc95a57 AS rust-base
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
