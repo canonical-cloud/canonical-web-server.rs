@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/publish-containers.yml
+      - release/current-containers.env
       - Dockerfile
       - Cargo.toml
       - Cargo.lock
@@ -15,6 +16,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/publish-containers.yml
+      - release/current-containers.env
       - Dockerfile
       - Cargo.toml
       - Cargo.lock
@@ -31,20 +33,27 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  WEB_IMAGE: ghcr.io/canonical-cloud/canonical-web-server
-  REVOKER_IMAGE: ghcr.io/canonical-cloud/canonical-session-revoker
-
 jobs:
   validate:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Check out source
+      - name: Check out source and release history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate declared release source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source release/current-containers.env
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$WEB_IMAGE" = "ghcr.io/canonical-cloud/canonical-web-server:${SOURCE_SHA}"
+          test "$REVOKER_IMAGE" = "ghcr.io/canonical-cloud/canonical-session-revoker:${SOURCE_SHA}"
+          git cat-file -e "${SOURCE_SHA}^{commit}"
 
       - name: Build both production targets without publishing
         run: |
@@ -67,11 +76,26 @@ jobs:
     permissions:
       contents: read
       packages: write
+      statuses: write
     steps:
-      - name: Check out immutable source revision
+      - name: Check out release declaration and full source history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      - name: Resolve the declared immutable release
+        shell: bash
+        run: |
+          set -euo pipefail
+          source release/current-containers.env
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$WEB_IMAGE" = "ghcr.io/canonical-cloud/canonical-web-server:${SOURCE_SHA}"
+          test "$REVOKER_IMAGE" = "ghcr.io/canonical-cloud/canonical-session-revoker:${SOURCE_SHA}"
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          printf 'SOURCE_SHA=%s\nWEB_IMAGE=%s\nREVOKER_IMAGE=%s\n' \
+            "$SOURCE_SHA" "$WEB_IMAGE" "$REVOKER_IMAGE" >> "$GITHUB_ENV"
+          git worktree add ../release-source "$SOURCE_SHA"
 
       - name: Authenticate to GitHub Container Registry
         env:
@@ -80,39 +104,93 @@ jobs:
           set -euo pipefail
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
 
-      - name: Build immutable release images
+      - name: Build immutable release images from the declared source
+        working-directory: ../release-source
         run: |
           set -euo pipefail
           common_labels=(
             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}"
-            --label "org.opencontainers.image.revision=${GITHUB_SHA}"
+            --label "org.opencontainers.image.revision=${SOURCE_SHA}"
             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           )
           docker build --pull --target web \
             "${common_labels[@]}" \
-            --tag "${WEB_IMAGE}:${GITHUB_SHA}" .
+            --tag "$WEB_IMAGE" .
           docker build --pull --target revoker \
             "${common_labels[@]}" \
-            --tag "${REVOKER_IMAGE}:${GITHUB_SHA}" .
+            --tag "$REVOKER_IMAGE" .
 
-      - name: Push immutable SHA tags
+      - name: Push both immutable tags
         run: |
           set -euo pipefail
-          docker push "${WEB_IMAGE}:${GITHUB_SHA}"
-          docker push "${REVOKER_IMAGE}:${GITHUB_SHA}"
+          docker push "$WEB_IMAGE"
+          docker push "$REVOKER_IMAGE"
+
+      - name: Pull back and inspect the remote release
+        run: |
+          set -euo pipefail
+          docker image rm "$WEB_IMAGE" "$REVOKER_IMAGE"
+          docker pull --quiet "$WEB_IMAGE"
+          docker pull --quiet "$REVOKER_IMAGE"
+          test "$(docker image inspect "$WEB_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$SOURCE_SHA"
+          test "$(docker image inspect "$REVOKER_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$SOURCE_SHA"
+          test "$(docker image inspect "$WEB_IMAGE" --format '{{.Config.User}}')" = '65532:65532'
+          test "$(docker image inspect "$REVOKER_IMAGE" --format '{{.Config.User}}')" = '65532:65532'
+          test "$(docker image inspect "$WEB_IMAGE" --format '{{json .Config.Entrypoint}}')" = '["/usr/local/bin/canonical-web-server"]'
+          test "$(docker image inspect "$REVOKER_IMAGE" --format '{{json .Config.Entrypoint}}')" = '["/usr/local/bin/canonical-session-revoker"]'
 
       - name: Record registry digests
         run: |
           set -euo pipefail
-          web_digest="$(docker image inspect "${WEB_IMAGE}:${GITHUB_SHA}" --format '{{index .RepoDigests 0}}')"
-          revoker_digest="$(docker image inspect "${REVOKER_IMAGE}:${GITHUB_SHA}" --format '{{index .RepoDigests 0}}')"
+          web_digest="$(docker image inspect "$WEB_IMAGE" --format '{{index .RepoDigests 0}}')"
+          revoker_digest="$(docker image inspect "$REVOKER_IMAGE" --format '{{index .RepoDigests 0}}')"
           {
             echo '## Canonical Cloud immutable containers'
             echo
-            echo "- Source revision: \`${GITHUB_SHA}\`"
+            echo "- Source revision: \`${SOURCE_SHA}\`"
             echo "- Web: \`${web_digest}\`"
             echo "- Revoker: \`${revoker_digest}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish successful release status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          payload="$(jq -nc \
+            --arg state success \
+            --arg context canonical-containers/published \
+            --arg description 'Both immutable GHCR images were pushed, pulled back, and inspected' \
+            --arg target_url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            '{state:$state,context:$context,description:$description,target_url:$target_url}')"
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --data "$payload" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/statuses/${SOURCE_SHA}"
+
+      - name: Publish failed release status
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          source release/current-containers.env
+          payload="$(jq -nc \
+            --arg state failure \
+            --arg context canonical-containers/published \
+            --arg description 'Immutable GHCR publication or pull-back verification failed' \
+            --arg target_url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            '{state:$state,context:$context,description:$description,target_url:$target_url}')"
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --data "$payload" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/statuses/${SOURCE_SHA}"
 
       - name: Remove registry credentials
         if: always()
