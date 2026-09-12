@@ -3,6 +3,7 @@ mod health;
 mod pages;
 mod quote;
 mod readiness;
+mod training;
 mod websocket;
 
 pub mod api;
@@ -62,6 +63,10 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(health::healthz))
         .route("/readyz", get(health::readyz))
         .route("/metrics", get(metrics::endpoint))
+        // `/training` is public product education rendered by this Rust BFF.
+        // It sets a stricter route-local CSP/cache policy and deliberately
+        // stays outside the session-protected application layer.
+        .merge(training::router())
         .merge(private_application)
         // Administrative UI/API lives on a separate future origin and
         // process. Reserve this namespace so it can never be answered by the
