@@ -1,0 +1,119 @@
+name: publish containers
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/publish-containers.yml
+      - Dockerfile
+      - Cargo.toml
+      - Cargo.lock
+      - client/**
+      - crates/**
+      - migrations/**
+      - src/**
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-containers.yml
+      - Dockerfile
+      - Cargo.toml
+      - Cargo.lock
+      - client/**
+      - crates/**
+      - migrations/**
+      - src/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  WEB_IMAGE: ghcr.io/canonical-cloud/canonical-web-server
+  REVOKER_IMAGE: ghcr.io/canonical-cloud/canonical-session-revoker
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Build both production targets without publishing
+        run: |
+          set -euo pipefail
+          docker build --pull --target web --tag canonical-web-server:pr .
+          docker build --pull --target revoker --tag canonical-session-revoker:pr .
+
+      - name: Verify non-root image users and entrypoints
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect canonical-web-server:pr --format '{{.Config.User}}')" = '65532:65532'
+          test "$(docker image inspect canonical-session-revoker:pr --format '{{.Config.User}}')" = '65532:65532'
+          test "$(docker image inspect canonical-web-server:pr --format '{{json .Config.Entrypoint}}')" = '["/usr/local/bin/canonical-web-server"]'
+          test "$(docker image inspect canonical-session-revoker:pr --format '{{json .Config.Entrypoint}}')" = '["/usr/local/bin/canonical-session-revoker"]'
+
+  publish:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out immutable source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Authenticate to GitHub Container Registry
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Build immutable release images
+        run: |
+          set -euo pipefail
+          common_labels=(
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}"
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}"
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          )
+          docker build --pull --target web \
+            "${common_labels[@]}" \
+            --tag "${WEB_IMAGE}:${GITHUB_SHA}" .
+          docker build --pull --target revoker \
+            "${common_labels[@]}" \
+            --tag "${REVOKER_IMAGE}:${GITHUB_SHA}" .
+
+      - name: Push immutable SHA tags
+        run: |
+          set -euo pipefail
+          docker push "${WEB_IMAGE}:${GITHUB_SHA}"
+          docker push "${REVOKER_IMAGE}:${GITHUB_SHA}"
+
+      - name: Record registry digests
+        run: |
+          set -euo pipefail
+          web_digest="$(docker image inspect "${WEB_IMAGE}:${GITHUB_SHA}" --format '{{index .RepoDigests 0}}')"
+          revoker_digest="$(docker image inspect "${REVOKER_IMAGE}:${GITHUB_SHA}" --format '{{index .RepoDigests 0}}')"
+          {
+            echo '## Canonical Cloud immutable containers'
+            echo
+            echo "- Source revision: \`${GITHUB_SHA}\`"
+            echo "- Web: \`${web_digest}\`"
+            echo "- Revoker: \`${revoker_digest}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove registry credentials
+        if: always()
+        run: docker logout ghcr.io || true
