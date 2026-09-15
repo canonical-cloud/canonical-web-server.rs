@@ -11,4 +11,4 @@ permissions:
 
 jobs:
   validate:
-    uses: canonical-cloud/canonical.cloud/.github/workflows/agents-hierarchy.yml@653d90ade730ebd966d50e48bcca7bdb63a82759
+    uses: canonical-cloud/canonical.cloud/.github/workflows/agents-hierarchy.yml@adffdd4fe89aebdff1494195389b16a3cebc308c
