@@ -4,7 +4,7 @@ import { access, readdir, readFile } from "node:fs/promises";
 const root = new URL("../", import.meta.url);
 const workflowsDirectory = new URL(".github/workflows/", root);
 const allowedReadOnlyReusableWorkflows = new Set([
-  "canonical-cloud/canonical.cloud/.github/workflows/agents-hierarchy.yml@653d90ade730ebd966d50e48bcca7bdb63a82759",
+  "canonical-cloud/canonical.cloud/.github/workflows/agents-hierarchy.yml@adffdd4fe89aebdff1494195389b16a3cebc308c",
   "canonical-cloud/.github/.github/workflows/reusable-policy.yml@0ea46201f6a0055aa5d28c465488394d3c2c56c0",
 ]);
 
@@ -126,7 +126,7 @@ assert.deepEqual(
 );
 
 const safePreamble = "permissions:\n  contents: read\n";
-const safeValidationWorkflow = `${safePreamble}jobs:\n  validate:\n    uses: canonical-cloud/canonical.cloud/.github/workflows/agents-hierarchy.yml@653d90ade730ebd966d50e48bcca7bdb63a82759`;
+const safeValidationWorkflow = `${safePreamble}jobs:\n  validate:\n    uses: canonical-cloud/canonical.cloud/.github/workflows/agents-hierarchy.yml@adffdd4fe89aebdff1494195389b16a3cebc308c`;
 assert.deepEqual(
   workflowViolations(safeValidationWorkflow),
   [],
