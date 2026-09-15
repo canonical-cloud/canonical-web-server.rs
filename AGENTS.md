@@ -118,15 +118,15 @@ operation that can rewrite the working tree:
    branch. Never use `git stash` as preservation and never discard work that may
    belong to another session.
 3. Run `git fetch --all --prune`.
-4. Merge the upstream tracking branch into the local branch. Resolve conflicts
-   semantically; do not merely choose one side.
+4. Use `git merge` to integrate the upstream tracking branch into the local
+   branch. Resolve conflicts semantically; do not merely choose one side.
 5. Run the relevant checks, commit any conflict resolution with explicit paths,
    and `git push` so local and remote contain the same reviewed commits.
 
-Use merge commits where repository rules permit them. **Do not rebase, reset,
-stash, force-push, or bypass protected-branch checks to synchronize.** A
-protected `main` means publish a feature branch and pull request; it never means
-leave completed work only on a local machine.
+Use merge commits where repository rules permit them. **Do not use `git rebase`,
+`git reset`, `git stash`, force-push, or bypass protected-branch checks to
+synchronize.** A protected `main` means publish a feature branch and pull
+request; it never means leave completed work only on a local machine.
 
 <!-- ore-primary-branch-policy:begin -->
 ## Primary branch and concurrent-agent policy
