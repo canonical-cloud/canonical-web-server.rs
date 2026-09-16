@@ -1,0 +1,73 @@
+version = 1
+surface = "web"
+
+[implementation]
+engine = "ores_fs_v1"
+ownership = "in_house"
+react = "forbidden"
+jsx = "forbidden"
+external_meta_frameworks = "forbidden"
+renderers = ["mash", "leptos", "dioxus"]
+
+[filesystem]
+mode = "authoritative"
+root = "src/pages"
+leaf = "page.rs"
+generator_leaf = "gen.rs"
+static_before_dynamic = true
+fail_on_conflict = true
+dynamic_segment = "[param]"
+catch_all_segment = "[...param]"
+optional_catch_all_segment = "[[...param]]"
+
+[module_contract]
+compile_time = true
+generated_compile_glue = true
+page_functions = ["page"]
+page_attribute = "ores_page"
+generator_functions = ["generate_static_params"]
+generator_attribute = "ores_generate"
+route_functions = ["route"]
+
+[codegen]
+stage = "build"
+network_fetch = false
+require_pinned_contract = true
+require_contract_digest = true
+generate_framework_router = true
+static_source_analysis = true
+
+[rpc]
+api_docs = "ORESoftware/api-docs"
+role = "client_only"
+route_map_authoritative = false
+typed_page_calls = true
+expose_rpc_server = false
+pooled_transport = "ORESoftware/ores-rpc-calls-http-tcp-pool.rs"
+
+[prerender]
+enabled = true
+deterministic = true
+sort_and_dedupe = true
+require_versioned_remote_inputs = true
+generate_static_params = true
+manifest = "generated/prerender-routes.json"
+
+[revalidation]
+allow_timed = true
+allow_on_demand = true
+allow_dynamic_fallback = true
+static_export_requires_complete_paths = true
+
+[assets]
+enabled = true
+mode = "per_page"
+content_addressed = true
+shared_client_bundle = false
+react_runtime = false
+css_leaf = "style.css"
+rust_client_entry = "client.rs"
+output_root = "generated/page-assets"
+manifest = "generated/page-assets-manifest.json"
+wasm_have_header = "x-ores-wasm-have"
+wasm_have_cookie = "ores_wasm_have"
