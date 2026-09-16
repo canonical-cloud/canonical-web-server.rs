@@ -1,0 +1,22 @@
+schema_version = "1.0.0"
+surface = "web"
+route_root = "src/pages"
+leaf = "page.rs"
+filesystem_authoritative = true
+dynamic_segments = ["[param]", "[...param]", "[[...param]]"]
+
+[prerender]
+enabled = true
+function = "prerender_paths"
+manifest = "generated/prerender-routes.json"
+deterministic = true
+
+[api_docs]
+mode = "client_only"
+server_rpc = false
+typed_client = true
+contract_source = "sibling-api"
+
+[frameworks]
+shared_manifest = true
+adapters = ["mash", "leptos", "dioxus"]
