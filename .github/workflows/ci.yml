@@ -215,7 +215,7 @@ jobs:
       # Commit-pinned like the actions above (supply-chain hardening).
       - name: Install dpm
         run: >
-          cargo install --locked declarative-postgres-migrate
+          cargo install --locked --force declarative-postgres-migrate
           --git https://github.com/declarative-migrations/declarative-postgres-migrate.rs
           --rev 621d1c5e79f7753cb03191f30244ff3d931e5665
       - name: Create Supabase-shaped fixture
