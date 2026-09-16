@@ -1,0 +1,38 @@
+name: ores-stack-build-dev-smoke
+
+on:
+  push:
+    branches:
+      - test/ores-stack-build-dev-smoke
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canonical-ores-stack-build-dev-smoke
+  cancel-in-progress: true
+
+jobs:
+  ores-stack:
+    runs-on: canonical-browser
+    timeout-minutes: 35
+    steps:
+      - name: Check out private ores-stack branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ORESoftware/ores-stack
+          ref: feat/next-build-style-cli
+          token: ${{ secrets.CLI_CI_GITHUB_TOKEN || github.token }}
+          path: ores-stack
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install Rust 1.88.0
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.88.0
+
+      - name: Exercise ores-stack production and dev lifecycle
+        working-directory: ores-stack
+        run: bash scripts/ci-build-dev-smoke.sh
