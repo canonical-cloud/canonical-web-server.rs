@@ -4,7 +4,8 @@ import { access, readdir, readFile } from "node:fs/promises";
 const root = new URL("../", import.meta.url);
 const workflowsDirectory = new URL(".github/workflows/", root);
 const allowedReadOnlyReusableWorkflows = new Set([
-  "canonical-cloud/canonical.cloud/.github/workflows/agents-hierarchy.yml@202c89a988a9adaa43f5113d9d0d1d009bf60e3b",
+  "canonical-cloud/canonical.cloud/.github/workflows/agents-hierarchy.yml@adffdd4fe89aebdff1494195389b16a3cebc308c",
+  "canonical-cloud/.github/.github/workflows/reusable-policy.yml@0ea46201f6a0055aa5d28c465488394d3c2c56c0",
 ]);
 
 const publisherSignals = [
@@ -125,11 +126,18 @@ assert.deepEqual(
 );
 
 const safePreamble = "permissions:\n  contents: read\n";
-const safeValidationWorkflow = `${safePreamble}jobs:\n  validate:\n    uses: canonical-cloud/canonical.cloud/.github/workflows/agents-hierarchy.yml@202c89a988a9adaa43f5113d9d0d1d009bf60e3b`;
+const safeValidationWorkflow = `${safePreamble}jobs:\n  validate:\n    uses: canonical-cloud/canonical.cloud/.github/workflows/agents-hierarchy.yml@adffdd4fe89aebdff1494195389b16a3cebc308c`;
 assert.deepEqual(
   workflowViolations(safeValidationWorkflow),
   [],
   "the immutable read-only hierarchy validator is not a release publisher",
+);
+
+const safeOrganizationPolicyWorkflow = `${safePreamble}jobs:\n  policy:\n    uses: canonical-cloud/.github/.github/workflows/reusable-policy.yml@0ea46201f6a0055aa5d28c465488394d3c2c56c0`;
+assert.deepEqual(
+  workflowViolations(safeOrganizationPolicyWorkflow),
+  [],
+  "the immutable read-only organization policy is not a release publisher",
 );
 
 const adversarialFixtures = [
