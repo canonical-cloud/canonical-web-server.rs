@@ -2,7 +2,7 @@ use super::{AuthContext, CredentialSource};
 use crate::{error::AppError, AppState};
 use axum::{
     extract::FromRequestParts,
-    http::{header, request::Parts, HeaderMap},
+    http::{header, request::Parts, HeaderMap, Method},
 };
 use axum_extra::extract::cookie::CookieJar;
 
@@ -118,6 +118,7 @@ async fn authenticate_quote(
     state: &AppState,
     allow_bearer: bool,
 ) -> Result<AuthContext, AppError> {
+    let required_scopes = quote_scopes(&parts.method);
     // Explicit Authorization has fail-closed precedence. Quote API bearer
     // tokens are always verified by the configured Shared Auth realm so
     // api.canonical.plus has the same tenant, issuer, audience, and revocation
@@ -131,7 +132,10 @@ async fn authenticate_quote(
             .clone()
             .try_acquire_owned()
             .map_err(|_| AppError::AuthBusy)?;
-        return state.shared_auth.authenticate_bearer(token).await;
+        return state
+            .shared_auth
+            .authenticate_bearer(token, required_scopes)
+            .await;
     }
 
     let jar = CookieJar::from_headers(&parts.headers);
@@ -148,7 +152,17 @@ async fn authenticate_quote(
         .clone()
         .try_acquire_owned()
         .map_err(|_| AppError::AuthBusy)?;
-    state.shared_auth.authenticate_session(token).await
+    state
+        .shared_auth
+        .authenticate_session(token, required_scopes)
+        .await
+}
+
+fn quote_scopes(method: &Method) -> &'static [&'static str] {
+    match *method {
+        Method::GET | Method::HEAD | Method::OPTIONS => &["quotes:read"],
+        _ => &["quotes:write"],
+    }
 }
 
 fn bearer_token(headers: &HeaderMap) -> Result<Option<&str>, AppError> {
@@ -220,5 +234,13 @@ mod tests {
 
         headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer "));
         assert!(bearer_token(&headers).is_err());
+    }
+
+    #[test]
+    fn quote_methods_request_the_exact_read_or_write_scope() {
+        assert_eq!(quote_scopes(&Method::GET), &["quotes:read"]);
+        assert_eq!(quote_scopes(&Method::HEAD), &["quotes:read"]);
+        assert_eq!(quote_scopes(&Method::POST), &["quotes:write"]);
+        assert_eq!(quote_scopes(&Method::DELETE), &["quotes:write"]);
     }
 }

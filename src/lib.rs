@@ -5,6 +5,7 @@ pub mod api_server;
 pub mod app;
 pub mod auth;
 pub mod command;
+pub mod data_plane;
 pub mod database;
 pub mod env_compat;
 pub mod error;

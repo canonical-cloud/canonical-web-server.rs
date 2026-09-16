@@ -17,7 +17,8 @@ use crate::{auth::AuthContext, error::AppError};
 
 pub use canonical_interfaces::QuoteRequest;
 
-const MAX_RESPONSE_BYTES: usize = 512 * 1024;
+const MAX_REQUEST_BYTES: usize = 64 * 1024;
+const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 
 /// P2 boundary to the API-owned quote data plane. Keep the hop authenticated, deadline- and
 /// response-bounded, and non-redirecting; mutations reuse a stable idempotency key. Failures never
@@ -56,15 +57,22 @@ impl QuoteApiClient {
         let internal_auth_token = env::var("CANONICAL_INTERNAL_AUTH_TOKEN").map_err(|_| {
             AppError::BadRequest("CANONICAL_INTERNAL_AUTH_TOKEN is required".into())
         })?;
-        if internal_auth_token.trim() != internal_auth_token || internal_auth_token.len() < 32 {
+        if internal_auth_token.trim() != internal_auth_token
+            || internal_auth_token.chars().any(char::is_control)
+            || internal_auth_token
+                .bytes()
+                .filter(|byte| !byte.is_ascii_whitespace())
+                .count()
+                < 32
+        {
             return Err(AppError::BadRequest(
                 "CANONICAL_INTERNAL_AUTH_TOKEN must contain at least 32 bytes".into(),
             ));
         }
 
         let http = Client::builder()
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(20))
+            .connect_timeout(Duration::from_secs(2))
+            .timeout(Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::none())
             .user_agent("canonical-web-server/0.1")
             .build()?;
@@ -82,6 +90,10 @@ impl QuoteApiClient {
         request: &QuoteRequest,
         idempotency_key: Uuid,
     ) -> Result<QuoteResponse, AppError> {
+        let encoded = serde_json::to_vec(request)?;
+        if encoded.len() > MAX_REQUEST_BYTES {
+            return Err(AppError::BadRequest("quote request is too large".into()));
+        }
         let mut headers = self.headers(actor)?;
         headers.insert(
             "idempotency-key",
@@ -91,7 +103,8 @@ impl QuoteApiClient {
             .http
             .post(format!("{}/api/v1/quotes", self.base_url))
             .headers(headers)
-            .json(request)
+            .header("content-type", "application/json")
+            .body(encoded)
             .send()
             .await?;
         let accepted: QuoteSubmissionResponse = decode(response, StatusCode::ACCEPTED).await?;
@@ -175,6 +188,12 @@ async fn decode<T: DeserializeOwned>(
         return Err(AppError::ServiceUpstream);
     }
 
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
+    {
+        return Err(AppError::ServiceUpstream);
+    }
     let mut bytes = Vec::new();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
