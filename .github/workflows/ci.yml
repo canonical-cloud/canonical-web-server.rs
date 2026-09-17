@@ -246,11 +246,13 @@ jobs:
           SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_only
         run: cargo run --locked --quiet --bin canonical-web-server -- migrate
       - name: Declarative schema convergence (dpm verify)
-        run: >
-          dpm verify
-          --source deploy/postgres/schema.sql
-          --target postgresql://postgres:postgres@127.0.0.1:5432/postgres
-          --shadow postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP"
+          dpm verify \
+            --source "$GITHUB_WORKSPACE/deploy/postgres/schema.sql" \
+            --target postgresql://postgres:postgres@127.0.0.1:5432/postgres \
+            --shadow postgresql://postgres:postgres@127.0.0.1:5432/postgres
 
   # The same migrations + owner RLS contract must hold on CockroachDB (v25.2+
   # has forced RLS and policies over the Postgres wire protocol). Service
