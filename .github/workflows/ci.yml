@@ -215,7 +215,7 @@ jobs:
       # Commit-pinned like the actions above (supply-chain hardening).
       - name: Install dpm
         run: >
-          cargo install --locked --force declarative-postgres-migrate
+          cargo install --locked declarative-postgres-migrate
           --git https://github.com/declarative-migrations/declarative-postgres-migrate.rs
           --rev 621d1c5e79f7753cb03191f30244ff3d931e5665
       - name: Create Supabase-shaped fixture
@@ -246,13 +246,11 @@ jobs:
           SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_only
         run: cargo run --locked --quiet --bin canonical-web-server -- migrate
       - name: Declarative schema convergence (dpm verify)
-        shell: bash
-        run: |
-          cd "$RUNNER_TEMP"
-          dpm verify \
-            --source "$GITHUB_WORKSPACE/deploy/postgres/schema.sql" \
-            --target postgresql://postgres:postgres@127.0.0.1:5432/postgres \
-            --shadow postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        run: >
+          dpm verify
+          --source deploy/postgres/schema.sql
+          --target postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          --shadow postgresql://postgres:postgres@127.0.0.1:5432/postgres
 
   # The same migrations + owner RLS contract must hold on CockroachDB (v25.2+
   # has forced RLS and policies over the Postgres wire protocol). Service
