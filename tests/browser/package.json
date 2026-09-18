@@ -5,10 +5,20 @@
   "type": "module",
   "description": "Puppeteer + Playwright end-to-end tests that drive the axum server in a real browser.",
   "scripts": {
-    "test:browser": "node --test --test-concurrency=1 --test-timeout=120000 app-playwright.test.mjs app-puppeteer.test.mjs auth-hardening-playwright.test.mjs"
+    "test:browser": "node --test --test-concurrency=1 --test-timeout=120000 app-playwright.test.mjs app-puppeteer.test.mjs auth-hardening-playwright.test.mjs",
+    "lint:ores": "if [ -f ../../.ores-lint/lint.sh ]; then sh ../../.ores-lint/lint.sh; else echo 'ores-lint not installed'; fi",
+    "prepublishOnly": "npm run lint:ores"
   },
   "devDependencies": {
     "playwright": "^1.56.0",
     "puppeteer": "^25.3.0"
+  },
+  "oresLint": {
+    "note": "Declared, not installed. ores-lint resolves these from a global install - see .ores-lint/README.md",
+    "requires": {
+      "eslint": ">=9",
+      "typescript-eslint": ">=8 (optional; without it .ts files are skipped)"
+    },
+    "install": "npm i -g eslint typescript-eslint"
   }
 }
