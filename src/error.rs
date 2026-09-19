@@ -30,6 +30,8 @@ pub enum AppError {
     AuthBusy,
     #[error("database error")]
     Database(#[from] sea_orm::DbErr),
+    #[error("private persistence boundary failed")]
+    Persistence(#[from] canonical_orm_core::DataError),
     #[error("HTTP client configuration failed")]
     HttpClient(#[from] reqwest::Error),
     #[error("Supabase Auth client configuration failed")]
