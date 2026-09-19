@@ -35,8 +35,8 @@ base64 = "0.23.0"
 canonical-auth = { path = "crates/canonical-auth" }
 canonical-config = { path = "crates/canonical-config" }
 canonical-interfaces = { git = "https://github.com/canonical-cloud/canonical-interfaces", rev = "0cab33c2b2a494d2368ef1da0ebe5d614b3a96ef" }
-canonical-lib = { git = "https://github.com/canonical-cloud/canonical-lib-core", rev = "b95301a283e17f83eefc9b449068e33770e0181f" }
-canonical-orm-core = { git = "https://github.com/canonical-cloud/canonical-orm-core", rev = "fcf1ff71fa6f8b17f20ea5de98a591347293ee2d" }
+canonical-lib = { git = "https://github.com/canonical-cloud/canonical-lib-core", rev = "463a5f42eb346b12dac96ef35fb603d430554713" }
+canonical-orm-core = { git = "https://github.com/canonical-cloud/canonical-orm-core", rev = "0e9f7ae59cb23a929b31d25c5a2a89626a93b421" }
 canonical-session = { path = "crates/canonical-session" }
 canonical-store = { path = "crates/canonical-store" }
 chrono = { version = "0.4.42", features = ["serde"] }
