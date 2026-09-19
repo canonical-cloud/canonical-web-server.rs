@@ -1,23 +1,19 @@
 //! Process command dispatch kept separate from the binary entry point.
 
-use crate::{
-    config::{Config, MigrationConfig},
-    database, env_compat, server,
-};
+use crate::{config::Config, env_compat, server};
 
 pub async fn run(command: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     env_compat::install_internal_auth_token_alias();
     match command {
-        Some("migrate") => {
-            let config = MigrationConfig::from_env()?;
-            database::run_migrations(&config.database_url, config.database_max_connections).await?;
-            tracing::info!("database migrations complete");
-        }
         None | Some("serve") => server::run(Config::from_env()?).await?,
-        Some(command) => {
+        Some("migrate") => {
             return Err(
-                format!("unknown command {command:?}; expected `serve` or `migrate`").into(),
+                "database migrations are owned by canonical-orm-core; run the separate canonical-orm-migrate executable with the dedicated migrator identity"
+                    .into(),
             );
+        }
+        Some(command) => {
+            return Err(format!("unknown command {command:?}; expected `serve`").into());
         }
     }
     Ok(())
