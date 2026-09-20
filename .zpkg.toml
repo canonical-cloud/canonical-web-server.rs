@@ -29,11 +29,11 @@ canonical-session-revoker = "target/release/canonical-session-revoker"
 
 [lifecycle.pre-build]
 mode = "replace"
-command = "sh ./.zpkg/pre-build"
+command = "python3 conformance/check-server-layout.py && sh ./.zpkg/pre-build"
 
 [lifecycle.pre-publish]
 mode = "replace"
-command = "sh ./.zpkg/pre-publish"
+command = "python3 conformance/check-server-layout.py && sh ./.zpkg/pre-publish"
 
 [publish]
 include_readme = true
@@ -49,5 +49,8 @@ test = "cargo test --workspace --all-targets --locked"
 lint = "cargo clippy --workspace --all-targets --locked -- -D warnings"
 format = "cargo fmt --all -- --check"
 interface_contract = "python3 scripts/verify-interface-dependency.py"
+server_layout = "python3 conformance/check-server-layout.py"
+conformance = "python3 conformance/check-server-layout.py"
 prebuild = "sh ./.zpkg/pre-build"
 prepublish = "sh ./.zpkg/pre-publish"
+install_hooks = "sh scripts/install-git-hooks.sh"
