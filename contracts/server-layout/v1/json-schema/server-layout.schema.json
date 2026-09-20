@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://canonical.plus/contracts/server-layout/v1/web-server-layout.schema.json",
+  "title": "Canonical web server layout contract authority set",
+  "description": "Independent JSON Schema peer for the web filesystem, layout inheritance, and provider-neutral Lambda source contract.",
+  "x-ores-authority": "independent-peer",
+  "$ref": "WebServerLayoutContract",
+  "$defs": {
+    "WebSurface": {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"WebSurface","type":"string","enum":["web","admin_web"]},
+    "WebFilesystemContract": {
+      "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"WebFilesystemContract","type":"object","unevaluatedProperties":false,
+      "required":["root","page_leaf","generator_leaf","lambda_leaf","layout_leaf","url_mapping","route_groups","dynamic_segment","catch_all_segment","optional_catch_all_segment"],
+      "properties":{"root":{"const":"src/pages"},"page_leaf":{"const":"page.rs"},"generator_leaf":{"const":"gen.rs"},"lambda_leaf":{"const":"lambda.rs"},"layout_leaf":{"const":"layout.rs"},"url_mapping":{"const":"one_to_one"},"route_groups":{"const":false},"dynamic_segment":{"const":"[param]"},"catch_all_segment":{"const":"[...param]"},"optional_catch_all_segment":{"const":"[[...param]]"}}
+    },
+    "LayoutInheritanceContract": {
+      "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"LayoutInheritanceContract","type":"object","unevaluatedProperties":false,
+      "required":["enabled","leaf","inheritance","discovery_order","application_order","boundary","affects_url","function_name"],
+      "properties":{"enabled":{"const":true},"leaf":{"const":"layout.rs"},"inheritance":{"const":"ancestor_chain"},"discovery_order":{"const":"outer_to_inner"},"application_order":{"const":"inner_to_outer"},"boundary":{"const":"src/pages"},"affects_url":{"const":false},"function_name":{"const":"layout"}}
+    },
+    "WebLambdaSourceContract": {
+      "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"WebLambdaSourceContract","type":"object","unevaluatedProperties":false,
+      "required":["generated","provider_neutral","sibling_of","generated_by","semantic_authority"],
+      "properties":{"generated":{"const":true},"provider_neutral":{"const":true},"sibling_of":{"const":"page.rs"},"generated_by":{"const":"ores-stack"},"semantic_authority":{"const":"page.rs"}}
+    },
+    "WebServerLayoutContract": {
+      "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"WebServerLayoutContract","type":"object","unevaluatedProperties":false,
+      "required":["schema_version","surface","filesystem","layout","lambda"],
+      "properties":{"schema_version":{"const":"ores.server-layout.v1"},"surface":{"$ref":"WebSurface"},"filesystem":{"$ref":"WebFilesystemContract"},"layout":{"$ref":"LayoutInheritanceContract"},"lambda":{"$ref":"WebLambdaSourceContract"}}
+    }
+  }
+}
