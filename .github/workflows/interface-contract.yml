@@ -36,27 +36,9 @@ jobs:
           python-version: '3.12'
       - name: Verify one dependency authority across Zed, Cargo, and source
         run: python3 scripts/verify-interface-dependency.py
-      - name: Require approved private Canonical dependency credential
-        env:
-          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+      - name: Preserve application-repository credential boundary
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "$CANONICAL_LIB_READ_TOKEN" ]]; then
-            echo '::error::CANONICAL_LIB_READ_TOKEN is required only for the compile/lifecycle phase; credential-free interface parity already passed.'
-            exit 1
-          fi
-      - name: Compile every Rust consumer without changing the lock
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
-          GIT_CONFIG_COUNT: '1'
-          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ secrets.CANONICAL_LIB_READ_TOKEN }}@github.com/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/
-        run: cargo check --workspace --all-targets --locked
-      - name: Prove the lifecycle hook is the same release gate
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
-          GIT_CONFIG_COUNT: '1'
-          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ secrets.CANONICAL_LIB_READ_TOKEN }}@github.com/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/
-        run: sh ./.zpkg/pre-build
+          echo 'Authenticated private-Cargo compilation is intentionally owned by canonical-monorepo.'
+          echo 'This application workflow proves only the credential-free interface/provenance contract.'
