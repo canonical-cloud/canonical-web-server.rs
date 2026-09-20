@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+command -v zed >/dev/null 2>&1 || { echo 'zed required for pre-push routing admission' >&2; exit 1; }
+pack="${TMPDIR:-/tmp}/canonical-web-pack-$$"; trap 'rm -rf "$pack"' EXIT INT TERM
+zed validate; zed install; test -f .zpkg.lock; zed validate --require-lock; zed install --frozen; zed build; zed run test; mkdir -p "$pack"; zed pack --out "$pack"
+git ls-files --error-unmatch .zpkg.lock >/dev/null 2>&1 || { echo '.zpkg.lock must be committed' >&2; exit 1; }
+git diff --exit-code -- .zpkg.lock
