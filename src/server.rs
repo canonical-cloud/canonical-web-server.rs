@@ -8,6 +8,7 @@ use sea_orm::DatabaseBackend;
 
 use crate::{app, config::Config, error::AppError, ws, SERVICE};
 
+const ADMIN_DATABASE_URL_ENV: &str = "CANONICAL_ADMIN_DATABASE_URL";
 const AUDIT_DATABASE_URL_ENV: &str = "CANONICAL_AUDIT_DATABASE_URL";
 
 pub async fn run(config: Config) -> Result<(), AppError> {
@@ -16,21 +17,27 @@ pub async fn run(config: Config) -> Result<(), AppError> {
     // the exact `canonical_web_server` login with no role memberships, while
     // canonical-orm-core requires a `WebReadOnly` audit capability. Never make
     // one credential satisfy both boundaries.
+    if std::env::var_os(ADMIN_DATABASE_URL_ENV).is_some() {
+        return Err(AppError::Configuration(
+            "CANONICAL_ADMIN_DATABASE_URL belongs to the isolated admin plane and is forbidden in the customer web service",
+        ));
+    }
     let audit_database_url = std::env::var(AUDIT_DATABASE_URL_ENV)
         .map_err(|_| AppError::Configuration("CANONICAL_AUDIT_DATABASE_URL is required"))?;
-    if audit_database_url.trim().is_empty() {
+    let audit_database_url = audit_database_url.trim();
+    if audit_database_url.is_empty() {
         return Err(AppError::Configuration(
             "CANONICAL_AUDIT_DATABASE_URL must not be empty",
         ));
     }
-    if audit_database_url == config.database_url {
+    if audit_database_url == config.database_url.trim() {
         return Err(AppError::Configuration(
             "CANONICAL_AUDIT_DATABASE_URL must not equal the web/session DATABASE_URL",
         ));
     }
 
     let dual_orm =
-        DualOrmContext::connect_read_only(&audit_database_url, CapabilityProfile::WebReadOnly)
+        DualOrmContext::connect_read_only(audit_database_url, CapabilityProfile::WebReadOnly)
             .await?;
     dual_orm.ping_both().await?;
     dual_orm.assert_catalog_congruence().await?;
