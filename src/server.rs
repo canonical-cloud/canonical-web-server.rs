@@ -8,9 +8,16 @@ use sea_orm::DatabaseBackend;
 
 use crate::{app, config::Config, error::AppError, ws, SERVICE};
 
+const ADMIN_DATABASE_URL_ENV: &str = "CANONICAL_ADMIN_DATABASE_URL";
 const AUDIT_DATABASE_URL_ENV: &str = "CANONICAL_AUDIT_DATABASE_URL";
 
 pub async fn run(config: Config) -> Result<(), AppError> {
+    if std::env::var_os(ADMIN_DATABASE_URL_ENV).is_some() {
+        return Err(AppError::Configuration(
+            "CANONICAL_ADMIN_DATABASE_URL belongs to the isolated admin plane and is forbidden in the customer web process",
+        ));
+    }
+
     let audit_database_url = std::env::var(AUDIT_DATABASE_URL_ENV).map_err(|_| {
         AppError::Configuration(
             "CANONICAL_AUDIT_DATABASE_URL is required and must use the dedicated audit-plane read-only credential",
