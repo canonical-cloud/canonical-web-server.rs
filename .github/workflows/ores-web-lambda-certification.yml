@@ -21,12 +21,24 @@ jobs:
           persist-credentials: false
           show-progress: false
 
+      - name: Require explicit cross-repository read credential
+        shell: bash
+        env:
+          ORES_CROSS_REPO_READ_TOKEN: ${{ secrets.ORES_CROSS_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$ORES_CROSS_REPO_READ_TOKEN" || {
+            echo "ORES_CROSS_REPO_READ_TOKEN is required to read private ORESoftware/ores-stack" >&2
+            exit 1
+          }
+
       - name: Check out exact ores-stack candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ORESoftware/ores-stack
           ref: 68a32dbacb6717de592eca9ad269b9c5bfe9f14b
           path: .cert/ores-stack
+          token: ${{ secrets.ORES_CROSS_REPO_READ_TOKEN }}
           persist-credentials: false
           show-progress: false
 
