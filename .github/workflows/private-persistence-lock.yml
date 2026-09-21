@@ -8,6 +8,7 @@ on:
       - "src/**"
       - "crates/**"
       - "services/**"
+      - "scripts/cargo-private-read.sh"
       - ".github/workflows/private-persistence-lock.yml"
   push:
     branches: [main, dev]
@@ -17,6 +18,7 @@ on:
       - "src/**"
       - "crates/**"
       - "services/**"
+      - "scripts/cargo-private-read.sh"
       - ".github/workflows/private-persistence-lock.yml"
   workflow_dispatch:
 
@@ -48,19 +50,17 @@ jobs:
       - name: Regenerate expected lock mechanically
         env:
           CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
-          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-          GIT_CONFIG_COUNT: "1"
-          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ secrets.CANONICAL_LIB_READ_TOKEN }}@github.com/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/
         shell: bash
         run: |
           set -euo pipefail
           cp Cargo.lock /tmp/Cargo.lock.checked-in
-          cargo +1.95.0 generate-lockfile
+          sh scripts/cargo-private-read.sh +1.95.0 generate-lockfile
           mkdir -p target/lock-evidence
           cp Cargo.lock target/lock-evidence/Cargo.lock.generated
       - name: Compile exact dependency graph
-        run: cargo +1.95.0 check --workspace --all-targets --all-features --locked
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+        run: sh scripts/cargo-private-read.sh +1.95.0 check --workspace --all-targets --all-features --locked
       - name: Retain generated lock
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
