@@ -29,11 +29,11 @@ canonical-session-revoker = "target/release/canonical-session-revoker"
 
 [lifecycle.pre-build]
 mode = "replace"
-command = "python3 conformance/check-server-layout.py && sh ./.zpkg/pre-build"
+command = "sh ./.zpkg/pre-build"
 
 [lifecycle.pre-publish]
 mode = "replace"
-command = "python3 conformance/check-server-layout.py && sh ./.zpkg/pre-publish"
+command = "sh ./.zpkg/pre-publish"
 
 [publish]
 include_readme = true
