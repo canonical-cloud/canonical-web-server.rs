@@ -1,7 +1,7 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env sh
+set -eu
 
-if [[ -z "${CANONICAL_LIB_READ_TOKEN:-}" ]]; then
+if [ -z "${CANONICAL_LIB_READ_TOKEN:-}" ]; then
   echo 'CANONICAL_LIB_READ_TOKEN is required for read-only private Canonical Cargo dependencies.' >&2
   exit 1
 fi
