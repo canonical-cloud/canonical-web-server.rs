@@ -29,6 +29,8 @@ jobs:
           toolchain: "1.95.0"
 
       - name: Reject reachable vulnerable rkyv 0.7 graphs
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -43,7 +45,7 @@ jobs:
             local graph status
 
             set +e
-            graph="$(cargo tree --workspace "$@" \
+            graph="$(sh scripts/cargo-private-read.sh tree --workspace "$@" \
               --invert rkyv@0.7.46 \
               --edges normal,build,dev 2>&1)"
             status=$?
