@@ -47,6 +47,11 @@ jobs:
             test -s vendor/opto-sync-clients/clients/ts/package.json
           fi
       - name: Build the actual selected service image
-        run: docker build --progress=plain --target "$TARGET" --tag ores-launcher:ci .
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+        run: >-
+          docker build --progress=plain
+          --secret id=canonical_lib_read_token,env=CANONICAL_LIB_READ_TOKEN
+          --target "$TARGET" --tag ores-launcher:ci .
       - name: Certify the shell-free image contract
         run: bash docker/test-launcher-image.sh ores-launcher:ci "$APP"
