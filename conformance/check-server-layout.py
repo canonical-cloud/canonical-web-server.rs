@@ -25,6 +25,17 @@ def segment_shape(seg: str, terminal: bool) -> str:
     require(not any(c in seg for c in "[](){}"), f"reserved route syntax in {seg}")
     return seg
 
+def schema_refs(node: object):
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str):
+            yield ref
+        for value in node.values():
+            yield from schema_refs(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from schema_refs(value)
+
 routing = tomllib.loads((ROOT / ".ores-routing.toml").read_text())
 fs = routing["filesystem"]
 require(fs.get("root") == "src/pages", "filesystem root drift")
@@ -46,6 +57,14 @@ for required in [
 schema = json.loads((ROOT / "contracts/server-layout/v1/json-schema/server-layout.schema.json").read_text())
 require(schema.get("$schema") == "https://json-schema.org/draft/2020-12/schema", "server-layout schema draft drift")
 require(schema.get("x-ores-authority") == "independent-peer", "JSON Schema peer authority drift")
+schema_id = schema.get("$id")
+require(isinstance(schema_id, str) and schema_id.startswith("https://"), "server-layout schema needs an absolute HTTPS $id")
+expected_root = f"{schema_id}#/$defs/WebServerLayoutContract"
+require(schema.get("$ref") == expected_root, "server-layout schema root must select WebServerLayoutContract through $defs")
+for ref in schema_refs(schema):
+    require(ref.startswith(f"{schema_id}#/$defs/"), f"ambiguous or external server-layout $ref: {ref}")
+    target = ref.removeprefix(f"{schema_id}#/$defs/")
+    require(target in schema.get("$defs", {}), f"server-layout $ref points at missing $defs target: {target}")
 
 shapes: dict[str, Path] = {}
 if PAGES.exists():
