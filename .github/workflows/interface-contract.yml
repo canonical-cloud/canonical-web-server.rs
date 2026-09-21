@@ -7,6 +7,7 @@ on:
       - '.zpkg/**'
       - 'contracts/interfaces-source.lock.json'
       - 'scripts/verify-interface-dependency.py'
+      - 'scripts/cargo-private-read.sh'
       - 'src/routes/health.rs'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -37,6 +38,10 @@ jobs:
       - name: Verify one dependency authority across Zed, Cargo, and source
         run: python3 scripts/verify-interface-dependency.py
       - name: Compile every Rust consumer without changing the lock
-        run: cargo check --workspace --all-targets --locked
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+        run: sh scripts/cargo-private-read.sh check --workspace --all-targets --locked
       - name: Prove the lifecycle hook is the same release gate
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
         run: sh ./.zpkg/pre-build
