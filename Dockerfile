@@ -35,20 +35,26 @@ WORKDIR /build/canonical-web-server.rs
 # bundle or the customer HTTP binary.
 FROM rust-base AS revoker-build
 COPY . .
-RUN cargo build --locked --release -p canonical-session-revoker \
+RUN --mount=type=secret,id=canonical_lib_read_token,required=true \
+    CANONICAL_LIB_READ_TOKEN="$(cat /run/secrets/canonical_lib_read_token)" \
+    sh scripts/cargo-private-read.sh build --locked --release -p canonical-session-revoker \
     && strip target/release/canonical-session-revoker
 
 # The API image is intentionally independent of the browser bundle. It serves
 # only the REST and WebSocket route family used by api.canonical.plus.
 FROM rust-base AS api-build
 COPY . .
-RUN cargo build --locked --release -p canonical-web-server --bin canonical-api-server \
+RUN --mount=type=secret,id=canonical_lib_read_token,required=true \
+    CANONICAL_LIB_READ_TOKEN="$(cat /run/secrets/canonical_lib_read_token)" \
+    sh scripts/cargo-private-read.sh build --locked --release -p canonical-web-server --bin canonical-api-server \
     && strip target/release/canonical-api-server
 
 FROM rust-base AS web-build
 COPY . .
 COPY --from=client-build /build/client/dist ./client/dist
-RUN cargo build --locked --release -p canonical-web-server --bin canonical-web-server \
+RUN --mount=type=secret,id=canonical_lib_read_token,required=true \
+    CANONICAL_LIB_READ_TOKEN="$(cat /run/secrets/canonical_lib_read_token)" \
+    sh scripts/cargo-private-read.sh build --locked --release -p canonical-web-server --bin canonical-web-server \
     && strip target/release/canonical-web-server
 
 FROM gcr.io/distroless/cc-debian12:nonroot@sha256:adcd20c7b4c988b73cbfbddb26d2eee574571e6d7c9ffea29b3821e0690efb77 AS revoker
