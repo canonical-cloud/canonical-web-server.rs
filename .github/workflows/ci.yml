@@ -47,14 +47,20 @@ jobs:
       - name: fmt
         run: cargo fmt --all --check
       - name: clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+        run: sh scripts/cargo-private-read.sh clippy --workspace --all-targets --locked -- -D warnings
       - name: test
-        run: cargo test --workspace --all-targets --locked
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+        run: sh scripts/cargo-private-read.sh test --workspace --all-targets --locked
       - name: Test authentication is forbidden in release builds
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
         shell: bash
         run: |
           set +e
-          output="$(cargo check --locked --release --features test-auth \
+          output="$(sh scripts/cargo-private-read.sh check --locked --release --features test-auth \
             -p canonical-web-server --lib 2>&1)"
           status=$?
           set -e
@@ -68,9 +74,11 @@ jobs:
             exit 1
           fi
       - name: Revoker dependency boundary
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
         shell: bash
         run: |
-          tree="$(cargo tree --locked -p canonical-session-revoker)"
+          tree="$(sh scripts/cargo-private-read.sh tree --locked -p canonical-session-revoker)"
           if printf '%s\n' "$tree" | grep -E '(^| )((canonical-web-server)|(axum)|(maud)) v'; then
             echo "revoker must not depend on customer HTTP/view packages" >&2
             exit 1
@@ -92,13 +100,15 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked --version 0.22.2
       - name: Assert optional RSA package is not in the build graph
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
         shell: bash
         run: |
           # SQLx previously recorded a disabled optional MySQL/RSA edge. The
           # package is absent under SQLx 0.9, but keep a fail-closed graph check
           # in case a future lockfile brings it back.
           if grep -q '^name = "rsa"$' Cargo.lock; then
-            rsa_path="$(cargo tree --workspace --target all --invert rsa 2>/dev/null)"
+            rsa_path="$(sh scripts/cargo-private-read.sh tree --workspace --target all --invert rsa 2>/dev/null)"
             if [ -n "$rsa_path" ]; then
               echo "rsa unexpectedly entered an all-target dependency graph" >&2
               printf '%s\n' "$rsa_path" >&2
@@ -106,6 +116,8 @@ jobs:
             fi
           fi
       - name: Assert vulnerable rkyv is not in the active Linux build graph
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -113,7 +125,7 @@ jobs:
           # packages in Cargo.lock even when their activating feature is
           # disabled. Prove that no normal, build, or dev edge reaches it for
           # the production Linux target before applying the narrow audit ignore.
-          active_path="$(cargo tree \
+          active_path="$(sh scripts/cargo-private-read.sh tree \
             --workspace \
             --locked \
             --target x86_64-unknown-linux-gnu \
@@ -175,7 +187,9 @@ jobs:
         with:
           key: postgres-rls
       - name: PostgreSQL runtime-role and RLS integration test
-        run: cargo test --locked -p canonical-web-server --test postgres_rls -- --nocapture
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+        run: sh scripts/cargo-private-read.sh test --locked -p canonical-web-server --test postgres_rls -- --nocapture
 
   # deploy/postgres/schema.sql is the declarative source of truth for the
   # Supabase public schema, migrated with dpm (declarative-postgres-migrate).
@@ -235,6 +249,7 @@ jobs:
           done
       - name: Run SeaORM migrations
         env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
           MIGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
           MIGRATION_DATABASE_MAX_CONNECTIONS: "2"
           PORT: "8081"
@@ -244,7 +259,7 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
           SUPABASE_URL: http://127.0.0.1:54321
           SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_only
-        run: cargo run --locked --quiet --bin canonical-web-server -- migrate
+        run: sh scripts/cargo-private-read.sh run --locked --quiet --bin canonical-web-server -- migrate
       - name: Declarative schema convergence (dpm verify)
         env:
           SOURCE_DATABASE_URL: deploy/postgres/schema.sql
@@ -288,8 +303,9 @@ jobs:
           exit 1
       - name: CockroachDB migration and RLS integration test
         env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
           TEST_COCKROACH_ADMIN_URL: postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disable
-        run: cargo test --locked -p canonical-web-server --test cockroach_rls -- --nocapture
+        run: sh scripts/cargo-private-read.sh test --locked -p canonical-web-server --test cockroach_rls -- --nocapture
 
   # Browser e2e (Playwright + Puppeteer) driving a real `serve` process on a
   # temporary file-backed SQLite database — the same explicit migrate-then-serve
@@ -318,7 +334,9 @@ jobs:
         with:
           key: browser-e2e
       - name: Build server binary
-        run: cargo build --locked --features test-auth --bin canonical-web-server
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+        run: sh scripts/cargo-private-read.sh build --locked --features test-auth --bin canonical-web-server
       - name: Build client bundle
         run: |
           npm ci --prefix client
@@ -343,9 +361,15 @@ jobs:
           persist-credentials: false
           submodules: recursive
       - name: Build production image
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
         run: |
-          docker build --target web --tag canonical-web-server:ci .
-          docker build --target revoker --tag canonical-session-revoker:ci .
+          docker build \
+            --secret id=canonical_lib_read_token,env=CANONICAL_LIB_READ_TOKEN \
+            --target web --tag canonical-web-server:ci .
+          docker build \
+            --secret id=canonical_lib_read_token,env=CANONICAL_LIB_READ_TOKEN \
+            --target revoker --tag canonical-session-revoker:ci .
       - name: Run non-root health smoke
         shell: bash
         run: |
