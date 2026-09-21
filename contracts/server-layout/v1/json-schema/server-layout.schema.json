@@ -4,7 +4,7 @@
   "title": "Canonical web server layout contract authority set",
   "description": "Independent JSON Schema peer for the web filesystem, layout inheritance, and provider-neutral Lambda source contract.",
   "x-ores-authority": "independent-peer",
-  "$ref": "WebServerLayoutContract",
+  "$ref": "https://canonical.plus/contracts/server-layout/v1/web-server-layout.schema.json#/$defs/WebServerLayoutContract",
   "$defs": {
     "WebSurface": {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"WebSurface","type":"string","enum":["web","admin_web"]},
     "WebFilesystemContract": {
@@ -25,7 +25,7 @@
     "WebServerLayoutContract": {
       "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"WebServerLayoutContract","type":"object","unevaluatedProperties":false,
       "required":["schema_version","surface","filesystem","layout","lambda"],
-      "properties":{"schema_version":{"const":"ores.server-layout.v1"},"surface":{"$ref":"WebSurface"},"filesystem":{"$ref":"WebFilesystemContract"},"layout":{"$ref":"LayoutInheritanceContract"},"lambda":{"$ref":"WebLambdaSourceContract"}}
+      "properties":{"schema_version":{"const":"ores.server-layout.v1"},"surface":{"$ref":"https://canonical.plus/contracts/server-layout/v1/web-server-layout.schema.json#/$defs/WebSurface"},"filesystem":{"$ref":"https://canonical.plus/contracts/server-layout/v1/web-server-layout.schema.json#/$defs/WebFilesystemContract"},"layout":{"$ref":"https://canonical.plus/contracts/server-layout/v1/web-server-layout.schema.json#/$defs/LayoutInheritanceContract"},"lambda":{"$ref":"https://canonical.plus/contracts/server-layout/v1/web-server-layout.schema.json#/$defs/WebLambdaSourceContract"}}
     }
   }
 }
