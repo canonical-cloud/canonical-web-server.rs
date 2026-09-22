@@ -80,45 +80,49 @@ async fn verify_migration_database_role(
         ));
     }
 
-    if let Some(message) = migration_principal_refusal(
-        row.try_get::<bool>("", "is_superuser")?,
-        row.try_get::<bool>("", "bypasses_rls")?,
-        row.try_get::<bool>("", "can_create_role")?,
-        row.try_get::<bool>("", "can_create_database")?,
-        row.try_get::<bool>("", "can_replicate")?,
-        row.try_get::<bool>("", "has_memberships")?,
-        &login_role,
-        &current_role,
-    ) {
+    let principal = MigrationPrincipalFacts {
+        is_superuser: row.try_get::<bool>("", "is_superuser")?,
+        bypasses_rls: row.try_get::<bool>("", "bypasses_rls")?,
+        can_create_role: row.try_get::<bool>("", "can_create_role")?,
+        can_create_database: row.try_get::<bool>("", "can_create_database")?,
+        can_replicate: row.try_get::<bool>("", "can_replicate")?,
+        has_memberships: row.try_get::<bool>("", "has_memberships")?,
+        login_role: &login_role,
+        current_role: &current_role,
+    };
+    if let Some(message) = migration_principal_refusal(principal) {
         return Err(AppError::Configuration(message));
     }
 
     Ok(())
 }
 
-fn migration_principal_refusal(
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct MigrationPrincipalFacts<'a> {
     is_superuser: bool,
     bypasses_rls: bool,
     can_create_role: bool,
     can_create_database: bool,
     can_replicate: bool,
     has_memberships: bool,
-    login_role: &str,
-    current_role: &str,
-) -> Option<&'static str> {
-    if is_superuser {
+    login_role: &'a str,
+    current_role: &'a str,
+}
+
+fn migration_principal_refusal(principal: MigrationPrincipalFacts<'_>) -> Option<&'static str> {
+    if principal.is_superuser {
         return Some("legacy migrations refuse PostgreSQL SUPERUSER credentials");
     }
-    if bypasses_rls {
+    if principal.bypasses_rls {
         return Some("legacy migrations refuse PostgreSQL BYPASSRLS credentials");
     }
-    if can_create_role || can_create_database || can_replicate {
+    if principal.can_create_role || principal.can_create_database || principal.can_replicate {
         return Some("legacy migrations refuse CREATEROLE, CREATEDB, or REPLICATION credentials");
     }
-    if has_memberships {
+    if principal.has_memberships {
         return Some("legacy migrations refuse credentials that inherit another PostgreSQL role");
     }
-    if login_role != current_role {
+    if principal.login_role != principal.current_role {
         return Some("legacy migrations refuse SET ROLE sessions");
     }
     None
@@ -126,45 +130,42 @@ fn migration_principal_refusal(
 
 #[cfg(test)]
 mod tests {
-    use super::migration_principal_refusal;
+    use super::{MigrationPrincipalFacts, migration_principal_refusal};
+
+    fn ordinary_migrator<'a>(role: &'a str) -> MigrationPrincipalFacts<'a> {
+        MigrationPrincipalFacts {
+            is_superuser: false,
+            bypasses_rls: false,
+            can_create_role: false,
+            can_create_database: false,
+            can_replicate: false,
+            has_memberships: false,
+            login_role: role,
+            current_role: role,
+        }
+    }
 
     #[test]
     fn legacy_migrator_principal_is_fail_closed() {
         assert_eq!(
-            migration_principal_refusal(
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                "canonical_web_migrator",
-                "canonical_web_migrator",
-            ),
+            migration_principal_refusal(ordinary_migrator("canonical_web_migrator")),
             None
         );
-        assert!(migration_principal_refusal(
-            true, false, false, false, false, false, "postgres", "postgres",
-        )
-        .is_some());
-        assert!(migration_principal_refusal(
-            false, true, false, false, false, false, "migrator", "migrator",
-        )
-        .is_some());
-        assert!(migration_principal_refusal(
-            false, false, false, false, false, true, "migrator", "migrator",
-        )
-        .is_some());
-        assert!(migration_principal_refusal(
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            "login",
-            "delegated",
-        )
-        .is_some());
+
+        let mut principal = ordinary_migrator("postgres");
+        principal.is_superuser = true;
+        assert!(migration_principal_refusal(principal).is_some());
+
+        let mut principal = ordinary_migrator("migrator");
+        principal.bypasses_rls = true;
+        assert!(migration_principal_refusal(principal).is_some());
+
+        let mut principal = ordinary_migrator("migrator");
+        principal.has_memberships = true;
+        assert!(migration_principal_refusal(principal).is_some());
+
+        let mut principal = ordinary_migrator("login");
+        principal.current_role = "delegated";
+        assert!(migration_principal_refusal(principal).is_some());
     }
 }
