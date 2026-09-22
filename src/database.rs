@@ -113,9 +113,7 @@ fn migration_principal_refusal(
         return Some("legacy migrations refuse PostgreSQL BYPASSRLS credentials");
     }
     if can_create_role || can_create_database || can_replicate {
-        return Some(
-            "legacy migrations refuse CREATEROLE, CREATEDB, or REPLICATION credentials",
-        );
+        return Some("legacy migrations refuse CREATEROLE, CREATEDB, or REPLICATION credentials");
     }
     if has_memberships {
         return Some("legacy migrations refuse credentials that inherit another PostgreSQL role");
@@ -146,36 +144,15 @@ mod tests {
             None
         );
         assert!(migration_principal_refusal(
-            true,
-            false,
-            false,
-            false,
-            false,
-            false,
-            "postgres",
-            "postgres",
+            true, false, false, false, false, false, "postgres", "postgres",
         )
         .is_some());
         assert!(migration_principal_refusal(
-            false,
-            true,
-            false,
-            false,
-            false,
-            false,
-            "migrator",
-            "migrator",
+            false, true, false, false, false, false, "migrator", "migrator",
         )
         .is_some());
         assert!(migration_principal_refusal(
-            false,
-            false,
-            false,
-            false,
-            false,
-            true,
-            "migrator",
-            "migrator",
+            false, false, false, false, false, true, "migrator", "migrator",
         )
         .is_some());
         assert!(migration_principal_refusal(
