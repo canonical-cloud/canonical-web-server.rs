@@ -41,7 +41,10 @@ pub async fn run(config: Config) -> Result<(), AppError> {
             .await?;
     dual_orm.ping_both().await?;
     dual_orm.assert_catalog_congruence().await?;
-    tracing::info!(tenant_table = table::TENANTS, "audit dual ORM catalog verified");
+    tracing::info!(
+        tenant_table = table::TENANTS,
+        "audit dual ORM catalog verified"
+    );
 
     let port = config.port;
     // `config.database_url` remains exclusively the web/session database. Its
