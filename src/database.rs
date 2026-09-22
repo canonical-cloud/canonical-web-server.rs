@@ -130,7 +130,7 @@ fn migration_principal_refusal(principal: MigrationPrincipalFacts<'_>) -> Option
 
 #[cfg(test)]
 mod tests {
-    use super::{MigrationPrincipalFacts, migration_principal_refusal};
+    use super::{migration_principal_refusal, MigrationPrincipalFacts};
 
     fn ordinary_migrator<'a>(role: &'a str) -> MigrationPrincipalFacts<'a> {
         MigrationPrincipalFacts {
