@@ -7,6 +7,14 @@ const allowedReadOnlyReusableWorkflows = new Set([
   "canonical-cloud/canonical.cloud/.github/workflows/agents-hierarchy.yml@adffdd4fe89aebdff1494195389b16a3cebc308c",
   "canonical-cloud/.github/.github/workflows/reusable-policy.yml@0ea46201f6a0055aa5d28c465488394d3c2c56c0",
 ]);
+// A read-only verification workflow may need a credential solely to fetch a
+// private dependency. That does not make it a release publisher. Keep this
+// allowlist filename-scoped so arbitrary workflows cannot gain secret access
+// without updating this policy test, and continue applying every publishing
+// signal below to the allowlisted workflow.
+const allowedReadOnlyCredentialWorkflows = new Set([
+  "private-persistence-lock.yml",
+]);
 
 const publisherSignals = [
   ["write-all permissions", /\bpermissions\s*:\s*["']?write-all["']?/i],
@@ -88,10 +96,16 @@ function outboundReusableWorkflowViolations(workflow) {
     .map(() => "outbound reusable workflow");
 }
 
-function workflowViolations(workflow) {
+function workflowViolations(workflow, workflowName = "") {
   const executable = executableWorkflowText(workflow);
+  const secretIsAllowed = allowedReadOnlyCredentialWorkflows.has(workflowName);
   const violations = publisherSignals
-    .filter(([, pattern]) => pattern.test(executable))
+    .filter(([description, pattern]) => {
+      if (description === "secret-backed credential" && secretIsAllowed) {
+        return false;
+      }
+      return pattern.test(executable);
+    })
     .map(([description]) => description);
   violations.push(...outboundReusableWorkflowViolations(executable));
   if (!hasReadOnlyTopLevelPermissions(workflow)) {
@@ -108,7 +122,7 @@ assert.ok(workflowNames.length > 0, "expected GitHub Actions workflows");
 const violations = [];
 for (const name of workflowNames) {
   const workflow = await readFile(new URL(name, workflowsDirectory), "utf8");
-  for (const violation of workflowViolations(workflow)) {
+  for (const violation of workflowViolations(workflow, name)) {
     violations.push(`${name}: ${violation}`);
   }
 }
@@ -138,6 +152,27 @@ assert.deepEqual(
   workflowViolations(safeOrganizationPolicyWorkflow),
   [],
   "the immutable read-only organization policy is not a release publisher",
+);
+
+const safePrivateReadWorkflow = `${safePreamble}jobs:\n  verify:\n    steps:\n      - env:\n          TOKEN: \${{ secrets.CANONICAL_LIB_READ_TOKEN }}\n        run: cargo check --locked`;
+assert.deepEqual(
+  workflowViolations(safePrivateReadWorkflow, "private-persistence-lock.yml"),
+  [],
+  "the explicitly allowlisted read-only private dependency verifier is not a release publisher",
+);
+assert.ok(
+  workflowViolations(safePrivateReadWorkflow, "other-workflow.yml").includes(
+    "secret-backed credential",
+  ),
+  "secret-backed credentials remain forbidden outside the filename-scoped read-only verifier allowlist",
+);
+const unsafeAllowlistedPublisher = `${safePrivateReadWorkflow}\n      - run: docker push ghcr.io/example/app:latest`;
+assert.ok(
+  workflowViolations(
+    unsafeAllowlistedPublisher,
+    "private-persistence-lock.yml",
+  ).includes("Docker push command"),
+  "the credential allowlist must never exempt publishing behavior",
 );
 
 const adversarialFixtures = [
