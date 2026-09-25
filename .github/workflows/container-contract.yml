@@ -11,6 +11,7 @@ on:
       - crates/**
       - docker/**
       - migrations/**
+      - scripts/cargo-private-read.sh
       - src/**
       - tests/release-boundary.mjs
       - vendor/**
@@ -25,6 +26,7 @@ on:
       - crates/**
       - docker/**
       - migrations/**
+      - scripts/cargo-private-read.sh
       - src/**
       - tests/release-boundary.mjs
       - vendor/**
@@ -52,11 +54,19 @@ jobs:
         run: node tests/release-boundary.mjs
 
       - name: Build all production targets without publishing
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
         run: |
           set -euo pipefail
-          docker build --pull --target web --tag canonical-web-server:pr .
-          docker build --pull --target api --tag canonical-api-server:pr .
-          docker build --pull --target revoker --tag canonical-session-revoker:pr .
+          docker build --pull \
+            --secret id=canonical_lib_read_token,env=CANONICAL_LIB_READ_TOKEN \
+            --target web --tag canonical-web-server:pr .
+          docker build --pull \
+            --secret id=canonical_lib_read_token,env=CANONICAL_LIB_READ_TOKEN \
+            --target api --tag canonical-api-server:pr .
+          docker build --pull \
+            --secret id=canonical_lib_read_token,env=CANONICAL_LIB_READ_TOKEN \
+            --target revoker --tag canonical-session-revoker:pr .
 
       - name: Verify non-root launcher image contracts
         shell: bash

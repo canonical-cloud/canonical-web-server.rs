@@ -7,6 +7,15 @@ const allowedReadOnlyReusableWorkflows = new Set([
   "canonical-cloud/canonical.cloud/.github/workflows/agents-hierarchy.yml@adffdd4fe89aebdff1494195389b16a3cebc308c",
   "canonical-cloud/.github/.github/workflows/reusable-policy.yml@0ea46201f6a0055aa5d28c465488394d3c2c56c0",
 ]);
+const allowedPrivateDependencyCredentialWorkflows = new Set([
+  "ci.yml",
+  "container-contract.yml",
+  "interface-contract.yml",
+  "private-persistence-lock.yml",
+  "rkyv-active-graph.yml",
+  "rust-launcher-image.yml",
+]);
+const privateDependencyCredential = "CANONICAL_LIB_READ_TOKEN";
 
 const publisherSignals = [
   ["write-all permissions", /\bpermissions\s*:\s*["']?write-all["']?/i],
@@ -26,7 +35,6 @@ const publisherSignals = [
     "OIDC write permission",
     /(?:^\s*|[{,]\s*)["']?id-token["']?\s*:\s*["']?write["']?/im,
   ],
-  ["secret-backed credential", /\$\{\{\s*secrets(?:\.|\[)/i],
   [
     "inherited reusable-workflow secrets",
     /^\s*secrets\s*:\s*["']?inherit["']?\s*$/im,
@@ -88,11 +96,36 @@ function outboundReusableWorkflowViolations(workflow) {
     .map(() => "outbound reusable workflow");
 }
 
-function workflowViolations(workflow) {
+function secretCredentialViolations(workflowName, workflow) {
+  const genericMatches = [
+    ...workflow.matchAll(/\$\{\{\s*secrets(?:\.|\[)/gi),
+  ];
+  if (genericMatches.length === 0) return [];
+
+  const exactMatches = [
+    ...workflow.matchAll(
+      /\$\{\{\s*secrets(?:\.([A-Za-z0-9_]+)|\[\s*["']([^"']+)["']\s*\])\s*\}\}/g,
+    ),
+  ];
+  if (exactMatches.length !== genericMatches.length) {
+    return ["secret-backed credential"];
+  }
+
+  const allowedWorkflow =
+    allowedPrivateDependencyCredentialWorkflows.has(workflowName);
+  const rejected = exactMatches.some((match) => {
+    const secretName = match[1] ?? match[2];
+    return !allowedWorkflow || secretName !== privateDependencyCredential;
+  });
+  return rejected ? ["secret-backed credential"] : [];
+}
+
+function workflowViolations(workflowName, workflow) {
   const executable = executableWorkflowText(workflow);
   const violations = publisherSignals
     .filter(([, pattern]) => pattern.test(executable))
     .map(([description]) => description);
+  violations.push(...secretCredentialViolations(workflowName, executable));
   violations.push(...outboundReusableWorkflowViolations(executable));
   if (!hasReadOnlyTopLevelPermissions(workflow)) {
     violations.push("top-level permissions are not exactly contents: read");
@@ -108,7 +141,7 @@ assert.ok(workflowNames.length > 0, "expected GitHub Actions workflows");
 const violations = [];
 for (const name of workflowNames) {
   const workflow = await readFile(new URL(name, workflowsDirectory), "utf8");
-  for (const violation of workflowViolations(workflow)) {
+  for (const violation of workflowViolations(name, workflow)) {
     violations.push(`${name}: ${violation}`);
   }
 }
@@ -128,16 +161,43 @@ assert.deepEqual(
 const safePreamble = "permissions:\n  contents: read\n";
 const safeValidationWorkflow = `${safePreamble}jobs:\n  validate:\n    uses: canonical-cloud/canonical.cloud/.github/workflows/agents-hierarchy.yml@adffdd4fe89aebdff1494195389b16a3cebc308c`;
 assert.deepEqual(
-  workflowViolations(safeValidationWorkflow),
+  workflowViolations("agents-hierarchy.yml", safeValidationWorkflow),
   [],
   "the immutable read-only hierarchy validator is not a release publisher",
 );
 
 const safeOrganizationPolicyWorkflow = `${safePreamble}jobs:\n  policy:\n    uses: canonical-cloud/.github/.github/workflows/reusable-policy.yml@0ea46201f6a0055aa5d28c465488394d3c2c56c0`;
 assert.deepEqual(
-  workflowViolations(safeOrganizationPolicyWorkflow),
+  workflowViolations("organization-policy.yml", safeOrganizationPolicyWorkflow),
   [],
   "the immutable read-only organization policy is not a release publisher",
+);
+
+const safePrivateCargoRead = `${safePreamble}jobs:\n  validate:\n    steps:\n      - env:\n          CANONICAL_LIB_READ_TOKEN: \${{ secrets.CANONICAL_LIB_READ_TOKEN }}\n        run: ./scripts/cargo-private-read.sh check --locked`;
+assert.deepEqual(
+  workflowViolations("ci.yml", safePrivateCargoRead),
+  [],
+  "the exact read-only private dependency credential is admitted only in an allowlisted validation workflow",
+);
+assert.ok(
+  workflowViolations("unapproved.yml", safePrivateCargoRead).includes(
+    "secret-backed credential",
+  ),
+  "the private dependency credential is rejected outside the explicit workflow allowlist",
+);
+assert.ok(
+  workflowViolations(
+    "ci.yml",
+    `${safePreamble}env:\n  TOKEN: \${{ secrets.REGISTRY_TOKEN }}`,
+  ).includes("secret-backed credential"),
+  "other secrets remain publishing-capability violations even in an admitted workflow",
+);
+assert.ok(
+  workflowViolations(
+    "ci.yml",
+    `permissions:\n  contents: write\nenv:\n  CANONICAL_LIB_READ_TOKEN: \${{ secrets.CANONICAL_LIB_READ_TOKEN }}`,
+  ).includes("contents write permission"),
+  "read-only dependency auth never excuses repository write authority",
 );
 
 const adversarialFixtures = [
@@ -202,7 +262,7 @@ for (const [expected, fixture] of adversarialFixtures) {
     ? fixture
     : `${safePreamble}${fixture}`;
   assert.ok(
-    workflowViolations(workflow).includes(expected),
+    workflowViolations("adversarial.yml", workflow).includes(expected),
     `expected ${expected} for:\n${fixture}`,
   );
 }
