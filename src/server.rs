@@ -9,11 +9,9 @@ use sea_orm::DatabaseBackend;
 use crate::{app, config::Config, error::AppError, ws, SERVICE};
 
 pub async fn run(config: Config) -> Result<(), AppError> {
-    let dual_orm = DualOrmContext::connect_read_only(
-        &config.database_url,
-        CapabilityProfile::WebReadOnly,
-    )
-    .await?;
+    let dual_orm =
+        DualOrmContext::connect_read_only(&config.database_url, CapabilityProfile::WebReadOnly)
+            .await?;
     dual_orm.ping_both().await?;
     dual_orm.assert_catalog_congruence().await?;
     tracing::info!(tenant_table = table::TENANTS, "dual ORM catalog verified");
