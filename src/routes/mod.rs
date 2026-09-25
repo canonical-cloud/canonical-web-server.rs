@@ -11,7 +11,7 @@ pub mod api;
 use crate::{metrics, views, AppState};
 use axum::{
     http::{header, HeaderValue, StatusCode},
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Redirect, Response},
     routing::{any, get},
     Router,
 };
@@ -61,6 +61,9 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(health::healthz))
         .route("/readyz", get(health::readyz))
         .route("/metrics", get(metrics::endpoint))
+        // Keep the product-level route stable while the authenticated quote
+        // workspace retains its explicit `/u/quote` ownership boundary.
+        .route("/quote", get(quote_alias))
         // `/training` is public product education rendered by this Rust BFF.
         // It sets a stricter route-local CSP/cache policy and deliberately
         // stays outside the session-protected application layer.
@@ -114,6 +117,10 @@ pub fn api_only_router(state: AppState) -> Router {
             content_security_policy,
         ))
         .with_state(state)
+}
+
+async fn quote_alias() -> Redirect {
+    Redirect::temporary("/u/quote")
 }
 
 async fn admin_not_found() -> Response {
