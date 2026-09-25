@@ -35,7 +35,7 @@ pub fn router(state: AppState) -> Router {
     // that route rather than granting it to login, the main application, or
     // API-only responses.
     let quote_form = Router::new()
-        .route("/u/quote", get(quote::page).post(quote::submit))
+        .route("/u/quote", get(quote::page).post(quote::submit))\n        .route("/quote", get(quote::page).post(quote::submit))
         .layer(SetResponseHeaderLayer::overriding(
             header::CONTENT_SECURITY_POLICY,
             quote_content_security_policy,
@@ -44,7 +44,7 @@ pub fn router(state: AppState) -> Router {
     let private_application = Router::new()
         .route("/login", get(auth::login_page))
         .route("/ws", axum::routing::any(websocket::upgrade))
-        .route("/u/quote/{id}", get(quote::detail))
+        .route("/u/quote/{id}", get(quote::detail))\n        .route("/quote/{id}", get(quote::detail))
         .merge(quote_form)
         .nest("/api", api::router())
         .nest("/auth", auth::router())
