@@ -289,8 +289,8 @@ pub fn quote_page(actor: &AuthContext, quotes: &[QuoteResponse]) -> Markup {
                     p class="muted" {
                         "Do not submit credentials, protected health information, cardholder data, or production evidence."
                     }
-                    form class="card" method="post" action="/u/quote" data-opto-quote="true"
-                        hx-post="/u/quote" hx-target="#quote-results" hx-swap="afterbegin" {
+                    form class="card" method="post" action="/quote" data-opto-quote="true"
+                        hx-post="/quote" hx-target="#quote-results" hx-swap="afterbegin" {
                         input type="hidden" name="csrf" value=(csrf);
                         input type="hidden" name="client_request_id" value=(Uuid::new_v4());
 
@@ -412,7 +412,7 @@ pub fn quote_detail_page(actor: &AuthContext, quote: &QuoteResponse) -> Markup {
             }
             body {
                 main {
-                    p { a href="/u/quote" { "← All quotes" } }
+                    p { a href="/quote" { "← All quotes" } }
                     p class="muted" { "Signed in as " (actor.email) }
                     (quote_status_fragment(quote))
                 }
@@ -425,7 +425,7 @@ pub fn quote_status_fragment(quote: &QuoteResponse) -> Markup {
     if matches!(quote.status.as_str(), "queued" | "analyzing") {
         return html! {
             article id={ "quote-" (quote.id) } class="card"
-                hx-get={ "/u/quote/" (quote.id) }
+                hx-get={ "/quote/" (quote.id) }
                 hx-trigger="every 2s"
                 hx-swap="outerHTML" {
                 h2 { (quote.company_name) }
