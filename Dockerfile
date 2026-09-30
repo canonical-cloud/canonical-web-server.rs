@@ -28,27 +28,47 @@ FROM rust:1.98-slim-bookworm@sha256:ebd900bae66fd508b466cef82d64a83a5fb34682e4c8
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
-    && apt-get install --yes --no-install-recommends build-essential cmake
+    && apt-get install --yes --no-install-recommends build-essential cmake git
 WORKDIR /build/canonical-web-server.rs
+
+FROM rust-base AS rust-source
+COPY . .
+
+# Private Canonical git dependencies are fetched with a BuildKit secret. The
+# token exists only for `cargo fetch`; compilation then runs offline so build
+# scripts cannot inherit the credential. Cargo caches are BuildKit mounts and
+# are not copied into the final distroless images.
 
 # The no-ingress worker build intentionally has no dependency on the browser
 # bundle or the customer HTTP binary.
-FROM rust-base AS revoker-build
-COPY . .
-RUN cargo build --locked --release -p canonical-session-revoker \
+FROM rust-source AS revoker-build
+RUN --mount=type=secret,id=canonical_lib_read_token,required=true \
+    --mount=type=cache,target=/usr/local/cargo/registry,id=canonical-cargo-registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,id=canonical-cargo-git,sharing=locked \
+    CANONICAL_LIB_READ_TOKEN="$(cat /run/secrets/canonical_lib_read_token)" \
+      bash scripts/prefetch-private-cargo.sh \
+    && CARGO_NET_OFFLINE=true cargo build --locked --release -p canonical-session-revoker \
     && strip target/release/canonical-session-revoker
 
 # The API image is intentionally independent of the browser bundle. It serves
 # only the REST and WebSocket route family used by api.canonical.plus.
-FROM rust-base AS api-build
-COPY . .
-RUN cargo build --locked --release -p canonical-web-server --bin canonical-api-server \
+FROM rust-source AS api-build
+RUN --mount=type=secret,id=canonical_lib_read_token,required=true \
+    --mount=type=cache,target=/usr/local/cargo/registry,id=canonical-cargo-registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,id=canonical-cargo-git,sharing=locked \
+    CANONICAL_LIB_READ_TOKEN="$(cat /run/secrets/canonical_lib_read_token)" \
+      bash scripts/prefetch-private-cargo.sh \
+    && CARGO_NET_OFFLINE=true cargo build --locked --release -p canonical-web-server --bin canonical-api-server \
     && strip target/release/canonical-api-server
 
-FROM rust-base AS web-build
-COPY . .
+FROM rust-source AS web-build
 COPY --from=client-build /build/client/dist ./client/dist
-RUN cargo build --locked --release -p canonical-web-server --bin canonical-web-server \
+RUN --mount=type=secret,id=canonical_lib_read_token,required=true \
+    --mount=type=cache,target=/usr/local/cargo/registry,id=canonical-cargo-registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,id=canonical-cargo-git,sharing=locked \
+    CANONICAL_LIB_READ_TOKEN="$(cat /run/secrets/canonical_lib_read_token)" \
+      bash scripts/prefetch-private-cargo.sh \
+    && CARGO_NET_OFFLINE=true cargo build --locked --release -p canonical-web-server --bin canonical-web-server \
     && strip target/release/canonical-web-server
 
 FROM gcr.io/distroless/cc-debian12:nonroot@sha256:adcd20c7b4c988b73cbfbddb26d2eee574571e6d7c9ffea29b3821e0690efb77 AS revoker
