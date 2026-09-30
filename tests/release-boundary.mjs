@@ -8,8 +8,12 @@ const allowedReadOnlyReusableWorkflows = new Set([
   "canonical-cloud/.github/.github/workflows/reusable-policy.yml@0ea46201f6a0055aa5d28c465488394d3c2c56c0",
 ]);
 const allowedReadOnlySecretWorkflows = new Set([
+  "browser-e2e-selfhosted.yml",
   "ci.yml",
+  "container-contract.yml",
   "private-persistence-lock.yml",
+  "rkyv-active-graph.yml",
+  "rust-launcher-image.yml",
 ]);
 const approvedReadOnlyDependencySecret = /\$\{\{\s*secrets\.CANONICAL_LIB_READ_TOKEN\s*\}\}/g;
 
@@ -158,11 +162,13 @@ assert.deepEqual(
 );
 
 const safePrivateDependencyWorkflow = `${safePreamble}jobs:\n  verify:\n    steps:\n      - env:\n          CANONICAL_LIB_READ_TOKEN: \${{ secrets.CANONICAL_LIB_READ_TOKEN }}\n        run: bash scripts/prefetch-private-cargo.sh`;
-assert.deepEqual(
-  workflowViolations(safePrivateDependencyWorkflow, "ci.yml"),
-  [],
-  "the approved read-only dependency credential is not a release-publishing credential",
-);
+for (const workflowName of allowedReadOnlySecretWorkflows) {
+  assert.deepEqual(
+    workflowViolations(safePrivateDependencyWorkflow, workflowName),
+    [],
+    `the approved read-only dependency credential is not a release-publishing credential in ${workflowName}`,
+  );
+}
 assert.ok(
   workflowViolations(safePrivateDependencyWorkflow, "unapproved.yml").includes(
     "secret-backed credential",
