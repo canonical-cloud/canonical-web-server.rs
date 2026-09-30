@@ -52,11 +52,24 @@ jobs:
         run: node tests/release-boundary.mjs
 
       - name: Build all production targets without publishing
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+        shell: bash
         run: |
           set -euo pipefail
-          docker build --pull --target web --tag canonical-web-server:pr .
-          docker build --pull --target api --tag canonical-api-server:pr .
-          docker build --pull --target revoker --tag canonical-session-revoker:pr .
+          if [[ -z "$CANONICAL_LIB_READ_TOKEN" ]]; then
+            echo '::error::CANONICAL_LIB_READ_TOKEN is required for read-only private Canonical dependencies.'
+            exit 1
+          fi
+          for target in web api revoker; do
+            docker build --pull \
+              --secret id=canonical_lib_read_token,env=CANONICAL_LIB_READ_TOKEN \
+              --target "$target" \
+              --tag "canonical-${target}:pr" .
+          done
+          docker tag canonical-web:pr canonical-web-server:pr
+          docker tag canonical-api:pr canonical-api-server:pr
+          docker tag canonical-revoker:pr canonical-session-revoker:pr
 
       - name: Verify non-root launcher image contracts
         shell: bash
