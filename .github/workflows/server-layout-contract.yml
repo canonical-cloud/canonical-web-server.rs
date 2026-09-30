@@ -1,0 +1,101 @@
+name: server-layout peer-authority contract
+
+on:
+  pull_request:
+    paths:
+      - ".ores-routing.toml"
+      - "src/pages/**"
+      - "contracts/server-layout/**"
+      - "conformance/check-server-layout.py"
+      - ".github/workflows/server-layout-contract.yml"
+  push:
+    branches: [main]
+    paths:
+      - ".ores-routing.toml"
+      - "src/pages/**"
+      - "contracts/server-layout/**"
+      - "conformance/check-server-layout.py"
+      - ".github/workflows/server-layout-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-layout-contract-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  layout-and-peer-authority:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+
+      - name: Verify exact candidate revision
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Verify product filesystem and generated-source policy
+        run: python3 conformance/check-server-layout.py
+
+      - name: Require complete zero-waiver peer mapping
+        run: |
+          set -euo pipefail
+          jq -e '
+            .schema == "ores.typespec-json-schema-validator.mapping/v1" and
+            (.declarations | length) == 5 and
+            .ignore.typespec == [] and
+            .ignore.generated == [] and
+            .ignore.authored == [] and
+            ([.declarations[].typespec] | unique | length) == 5 and
+            ([.declarations[].generated] | unique | length) == 5 and
+            ([.declarations[].authored] | unique | length) == 5
+          ' contracts/server-layout/v1/tjsv/mapping.json
+
+      - name: Compare independent TypeSpec and JSON Schema authorities
+        uses: ORESoftware/typespec-json-schema-validator@7cf36bbcbd9523caaf894ac9188bd29633b7ac9f
+        with:
+          typespec: contracts/server-layout/v1/typespec/main.tsp
+          schema: contracts/server-layout/v1/json-schema/server-layout.schema.json
+          mapping: contracts/server-layout/v1/tjsv/mapping.json
+          report: .typespec-json-schema-validator/server-layout/report.json
+          sarif: .typespec-json-schema-validator/server-layout/report.sarif
+          contract_ir: .typespec-json-schema-validator/server-layout/contract-ir.json
+          output_dir: .typespec-json-schema-validator/server-layout/generated
+          quiet: "false"
+
+      - name: Require peer authorities and zero unexplained findings
+        run: |
+          set -euo pipefail
+          jq -e '
+            .schema == "ores.typespec-json-schema-validator.report/v1" and
+            .status == "passed" and
+            .zeroUnexplainedFindings == true and
+            .authorities.precedence == "none" and
+            .authorities.typespec.authority == "independently-authored" and
+            .authorities.jsonSchema.authority == "independently-authored" and
+            (.findings | length) == 0 and
+            (.differential.summary.divergences // 0) == 0 and
+            (.differential.summary.refusals // 0) == 0
+          ' .typespec-json-schema-validator/server-layout/report.json
+
+      - name: Prove authored authorities were not rewritten
+        run: git diff --exit-code -- contracts/server-layout .ores-routing.toml
+
+      - name: Retain deterministic parity evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: server-layout-contract-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .typespec-json-schema-validator/server-layout
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 30

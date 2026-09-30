@@ -14,11 +14,25 @@ mode = "authoritative"
 root = "src/pages"
 leaf = "page.rs"
 generator_leaf = "gen.rs"
+lambda_leaf = "lambda.rs"
+layout_leaf = "layout.rs"
+url_mapping = "one_to_one"
+route_groups = false
 static_before_dynamic = true
 fail_on_conflict = true
 dynamic_segment = "[param]"
 catch_all_segment = "[...param]"
 optional_catch_all_segment = "[[...param]]"
+
+[layout]
+enabled = true
+leaf = "layout.rs"
+inheritance = "ancestor_chain"
+discovery_order = "outer_to_inner"
+application_order = "inner_to_outer"
+boundary = "src/pages"
+affects_url = false
+functions = ["layout"]
 
 [module_contract]
 compile_time = true
@@ -27,6 +41,7 @@ page_functions = ["page"]
 page_attribute = "ores_page"
 generator_functions = ["generate_static_params"]
 generator_attribute = "ores_generate"
+layout_functions = ["layout"]
 route_functions = ["route"]
 
 [codegen]
@@ -36,6 +51,8 @@ require_pinned_contract = true
 require_contract_digest = true
 generate_framework_router = true
 static_source_analysis = true
+generate_lambda_source = true
+lambda_provider_neutral = true
 
 [rpc]
 api_docs = "ORESoftware/api-docs"

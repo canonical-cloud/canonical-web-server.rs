@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+exec python3 conformance/check-server-layout.py

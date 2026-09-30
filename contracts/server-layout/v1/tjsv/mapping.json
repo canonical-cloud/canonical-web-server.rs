@@ -1,0 +1,11 @@
+{
+  "schema": "ores.typespec-json-schema-validator.mapping/v1",
+  "declarations": [
+    {"typespec":"Ores.ServerLayout.V1.WebSurface","generated":"WebSurface","authored":"WebSurface"},
+    {"typespec":"Ores.ServerLayout.V1.WebFilesystemContract","generated":"WebFilesystemContract","authored":"WebFilesystemContract"},
+    {"typespec":"Ores.ServerLayout.V1.LayoutInheritanceContract","generated":"LayoutInheritanceContract","authored":"LayoutInheritanceContract"},
+    {"typespec":"Ores.ServerLayout.V1.WebLambdaSourceContract","generated":"WebLambdaSourceContract","authored":"WebLambdaSourceContract"},
+    {"typespec":"Ores.ServerLayout.V1.WebServerLayoutContract","generated":"WebServerLayoutContract","authored":"WebServerLayoutContract"}
+  ],
+  "ignore":{"typespec":[],"generated":[],"authored":[]}
+}
