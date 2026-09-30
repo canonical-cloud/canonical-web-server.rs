@@ -32,6 +32,10 @@ jobs:
         with:
           node-version: "22"
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - name: Prefetch locked private dependencies
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+        run: bash scripts/prefetch-private-cargo.sh
       - name: Application repository release boundary
         run: node tests/release-boundary.mjs
       - name: Independent readiness contract
@@ -47,11 +51,17 @@ jobs:
       - name: fmt
         run: cargo fmt --all --check
       - name: clippy
+        env:
+          CARGO_NET_OFFLINE: "true"
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: test
+        env:
+          CARGO_NET_OFFLINE: "true"
         run: cargo test --workspace --all-targets --locked
       - name: Test authentication is forbidden in release builds
         shell: bash
+        env:
+          CARGO_NET_OFFLINE: "true"
         run: |
           set +e
           output="$(cargo check --locked --release --features test-auth \
@@ -69,6 +79,8 @@ jobs:
           fi
       - name: Revoker dependency boundary
         shell: bash
+        env:
+          CARGO_NET_OFFLINE: "true"
         run: |
           tree="$(cargo tree --locked -p canonical-session-revoker)"
           if printf '%s\n' "$tree" | grep -E '(^| )((canonical-web-server)|(axum)|(maud)) v'; then
@@ -91,8 +103,14 @@ jobs:
           toolchain: "1.95.0"
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked --version 0.22.2
+      - name: Prefetch locked private dependencies
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+        run: bash scripts/prefetch-private-cargo.sh
       - name: Assert optional RSA package is not in the build graph
         shell: bash
+        env:
+          CARGO_NET_OFFLINE: "true"
         run: |
           # SQLx previously recorded a disabled optional MySQL/RSA edge. The
           # package is absent under SQLx 0.9, but keep a fail-closed graph check
@@ -107,6 +125,8 @@ jobs:
           fi
       - name: Assert vulnerable rkyv is not in the active Linux build graph
         shell: bash
+        env:
+          CARGO_NET_OFFLINE: "true"
         run: |
           set -euo pipefail
           # RUSTSEC-2026-0235 affects rkyv 0.7.46. Cargo retains optional
@@ -174,7 +194,13 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: postgres-rls
+      - name: Prefetch locked private dependencies
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+        run: bash scripts/prefetch-private-cargo.sh
       - name: PostgreSQL runtime-role and RLS integration test
+        env:
+          CARGO_NET_OFFLINE: "true"
         run: cargo test --locked -p canonical-web-server --test postgres_rls -- --nocapture
 
   # deploy/postgres/schema.sql is the declarative source of truth for the
@@ -218,6 +244,10 @@ jobs:
           cargo install --locked declarative-postgres-migrate
           --git https://github.com/declarative-migrations/declarative-postgres-migrate.rs
           --rev 621d1c5e79f7753cb03191f30244ff3d931e5665
+      - name: Prefetch locked private dependencies
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+        run: bash scripts/prefetch-private-cargo.sh
       - name: Create Supabase-shaped fixture
         shell: bash
         run: |
@@ -235,6 +265,7 @@ jobs:
           done
       - name: Run SeaORM migrations
         env:
+          CARGO_NET_OFFLINE: "true"
           MIGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
           MIGRATION_DATABASE_MAX_CONNECTIONS: "2"
           PORT: "8081"
@@ -273,6 +304,10 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: cockroach-rls
+      - name: Prefetch locked private dependencies
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+        run: bash scripts/prefetch-private-cargo.sh
       - name: Start single-node CockroachDB
         shell: bash
         run: |
@@ -288,6 +323,7 @@ jobs:
           exit 1
       - name: CockroachDB migration and RLS integration test
         env:
+          CARGO_NET_OFFLINE: "true"
           TEST_COCKROACH_ADMIN_URL: postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disable
         run: cargo test --locked -p canonical-web-server --test cockroach_rls -- --nocapture
 
@@ -317,7 +353,13 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: browser-e2e
+      - name: Prefetch locked private dependencies
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+        run: bash scripts/prefetch-private-cargo.sh
       - name: Build server binary
+        env:
+          CARGO_NET_OFFLINE: "true"
         run: cargo build --locked --features test-auth --bin canonical-web-server
       - name: Build client bundle
         run: |
@@ -343,9 +385,21 @@ jobs:
           persist-credentials: false
           submodules: recursive
       - name: Build production image
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+        shell: bash
         run: |
-          docker build --target web --tag canonical-web-server:ci .
-          docker build --target revoker --tag canonical-session-revoker:ci .
+          set -euo pipefail
+          if [[ -z "$CANONICAL_LIB_READ_TOKEN" ]]; then
+            echo '::error::CANONICAL_LIB_READ_TOKEN is required for read-only private Canonical dependencies.'
+            exit 1
+          fi
+          docker build \
+            --secret id=canonical_lib_read_token,env=CANONICAL_LIB_READ_TOKEN \
+            --target web --tag canonical-web-server:ci .
+          docker build \
+            --secret id=canonical_lib_read_token,env=CANONICAL_LIB_READ_TOKEN \
+            --target revoker --tag canonical-session-revoker:ci .
       - name: Run non-root health smoke
         shell: bash
         run: |
