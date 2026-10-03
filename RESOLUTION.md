@@ -1,0 +1,1 @@
+.zpkg.toml [scripts]: PR left `format` untouched while main added interface_contract/prebuild/prepublish; kept main's full script set. The PR's own change — [dependencies] on canonical-lib-core / canonical-orm-core / canonical-clients — merged cleanly and is kept.
