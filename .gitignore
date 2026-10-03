@@ -15,6 +15,7 @@
 
 # Scratch / git worktrees (tmp/worktrees/*)
 tmp/
+temp/
 
 # Browser e2e dependencies (installed on demand by CI / local runs).
 tests/browser/node_modules/
@@ -22,6 +23,9 @@ tmp
 temp
 tmp/worktrees
 temp/worktrees
+
+# Generated TypeSpec/JSON Schema parity evidence; authorities live in the pinned auditor source.
+.typespec-json-schema-validator/
 
 # --- environment / secrets (sops + age) -------------------------------------
 # Only env/enc/*.env.enc is tracked. Every plaintext form stays out of git;

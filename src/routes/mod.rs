@@ -2,6 +2,8 @@ mod auth;
 mod health;
 mod pages;
 mod quote;
+mod readiness;
+mod training;
 mod websocket;
 
 pub mod api;
@@ -46,7 +48,7 @@ pub fn router(state: AppState) -> Router {
         .merge(quote_form)
         .nest("/api", api::router())
         .nest("/auth", auth::router())
-        .nest("/app", pages::router())
+        .nest("/app", pages::router().merge(readiness::router()))
         // These responses can contain identity, CSRF tokens, or customer
         // records. Keep them out of browser and shared intermediary caches;
         // static application assets and the marketing fallback stay outside
@@ -59,6 +61,10 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(health::healthz))
         .route("/readyz", get(health::readyz))
         .route("/metrics", get(metrics::endpoint))
+        // `/training` is public product education rendered by this Rust BFF.
+        // It sets a stricter route-local CSP/cache policy and deliberately
+        // stays outside the session-protected application layer.
+        .merge(training::router())
         .merge(private_application)
         // Administrative UI/API lives on a separate future origin and
         // process. Reserve this namespace so it can never be answered by the

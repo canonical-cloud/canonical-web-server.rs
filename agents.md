@@ -101,29 +101,32 @@ moves, `git restore` / `git revert` to undo, and files under ignored
 
 ## Git worktrees
 
-Only when a human explicitly instructs use of a worktree, place it under `tmp/worktrees/<branch>` `tmp/` is ignored.
+Only when a human explicitly instructs use of a worktree, place it under `tmp/worktrees/<branch>`; `tmp/` is ignored.
 
 ## Syncing with the remote
 
-"Sync with the remote" (or just "sync") is a **two-way** exchange — pull the
-remote's commits down **and** push yours up. It is never push-only, and a clean
-local tree does not by itself mean "synced": you are done only once local and
-the remote hold the same commits.
+“Sync with the remote” (or just “sync”) is a **two-way exchange**: integrate
+remote commits and publish local commits. A clean working tree is not proof of
+synchronization, and a push without first checking the remote is not a sync.
 
-To sync:
+Before any pull, merge, checkout, switch, reset, clean, rebase, or worktree
+operation that can rewrite the working tree:
 
-1. **Commit your work first** (`git add` + `git commit`) so the tree is clean —
-   pull/merge only into a clean tree. `git pull` / `git merge` aborts when an
-   incoming change touches a file you have edited, and even when it doesn't it
-   buries the merge in your uncommitted work. (Can't commit yet? `git stash`,
-   then `git stash pop` after step 3.)
-2. `git fetch --all --prune` — safe any time; it only updates tracking refs.
-3. `git pull` (fetch + merge) — or `git merge` the upstream branch — to
-   integrate the remote's commits.
-4. `git push` to publish yours.
+1. Run `git status --porcelain` and `git stash list`.
+2. If tracked or untracked work exists, preserve it first on a `wip/<topic>` or
+   `rescue/<topic>` branch. Stage explicit reviewed paths, commit, and push the
+   branch. Never use `git stash` as preservation and never discard work that may
+   belong to another session.
+3. Run `git fetch --all --prune`.
+4. Merge the upstream tracking branch into the local branch. Resolve conflicts
+   semantically; do not merely choose one side.
+5. Run the relevant checks, commit any conflict resolution with explicit paths,
+   and `git push` so local and remote contain the same reviewed commits.
 
-Integrate with **`git merge` / `git pull`**. **Never `git rebase` to sync** — it
-rewrites history and breaks shared branches.
+Use merge commits where repository rules permit them. **Do not rebase, reset,
+stash, force-push, or bypass protected-branch checks to synchronize.** A
+protected `main` means publish a feature branch and pull request; it never means
+leave completed work only on a local machine.
 
 <!-- ore-primary-branch-policy:begin -->
 ## Primary branch and concurrent-agent policy

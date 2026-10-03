@@ -31,6 +31,8 @@ fn layout(title: &str, body: Markup, csrf: Option<&str>, account_key: Option<&st
                         " · "
                         a href="/app/engagements" { "Engagements" }
                         " · "
+                        a href="/app/readiness" { "Readiness" }
+                        " · "
                         a href="/u/quote" { "Get a quote" }
                     }
                 }
@@ -84,6 +86,12 @@ pub fn dashboard(actor: &AuthContext) -> Markup {
                         input type="hidden" name="csrf" value=(actor.csrf_token.as_deref().unwrap_or_default());
                         button type="submit" { "Sign out" }
                     }
+                }
+                section class="card" {
+                    h2 { "Independent readiness checklists" }
+                    p { "Prepare a separate evidence packet for each selected framework. These worksheets provide pre-audit intake, not certification." }
+                    p class="muted" { "Readiness answers stay in the worksheet tab until you export them; they are not saved with the draft notes below." }
+                    a href="/app/readiness" { "Open readiness worksheets" }
                 }
                 section class="card" {
                     h2 { "Optimistic draft note" }
