@@ -29,7 +29,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: "1.95.0"
+      - name: Prefetch locked private dependencies
+        env:
+          CANONICAL_LIB_READ_TOKEN: ${{ secrets.CANONICAL_LIB_READ_TOKEN }}
+        run: bash scripts/prefetch-private-cargo.sh
       - name: Build server binary
+        env:
+          CARGO_NET_OFFLINE: "true"
         run: cargo build --locked --features test-auth --bin canonical-web-server
       - name: Build client bundle
         run: |

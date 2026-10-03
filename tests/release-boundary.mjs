@@ -7,6 +7,15 @@ const allowedReadOnlyReusableWorkflows = new Set([
   "canonical-cloud/canonical.cloud/.github/workflows/agents-hierarchy.yml@adffdd4fe89aebdff1494195389b16a3cebc308c",
   "canonical-cloud/.github/.github/workflows/reusable-policy.yml@0ea46201f6a0055aa5d28c465488394d3c2c56c0",
 ]);
+const allowedReadOnlySecretWorkflows = new Set([
+  "browser-e2e-selfhosted.yml",
+  "ci.yml",
+  "container-contract.yml",
+  "private-persistence-lock.yml",
+  "rkyv-active-graph.yml",
+  "rust-launcher-image.yml",
+]);
+const approvedReadOnlyDependencySecret = /\$\{\{\s*secrets\.CANONICAL_LIB_READ_TOKEN\s*\}\}/g;
 
 const publisherSignals = [
   ["write-all permissions", /\bpermissions\s*:\s*["']?write-all["']?/i],
@@ -61,6 +70,17 @@ function executableWorkflowText(workflow) {
   return workflow.replace(/^\s*#.*$/gm, "");
 }
 
+function publisherSignalText(workflow, workflowName) {
+  const executable = executableWorkflowText(workflow);
+  if (!allowedReadOnlySecretWorkflows.has(workflowName)) {
+    return executable;
+  }
+  return executable.replace(
+    approvedReadOnlyDependencySecret,
+    "APPROVED_READ_ONLY_CANONICAL_DEPENDENCY_CREDENTIAL",
+  );
+}
+
 function hasReadOnlyTopLevelPermissions(workflow) {
   const lines = workflow.split(/\r?\n/);
   const permissionLines = lines
@@ -88,10 +108,11 @@ function outboundReusableWorkflowViolations(workflow) {
     .map(() => "outbound reusable workflow");
 }
 
-function workflowViolations(workflow) {
+function workflowViolations(workflow, workflowName = "<fixture>") {
   const executable = executableWorkflowText(workflow);
+  const signalText = publisherSignalText(workflow, workflowName);
   const violations = publisherSignals
-    .filter(([, pattern]) => pattern.test(executable))
+    .filter(([, pattern]) => pattern.test(signalText))
     .map(([description]) => description);
   violations.push(...outboundReusableWorkflowViolations(executable));
   if (!hasReadOnlyTopLevelPermissions(workflow)) {
@@ -108,7 +129,7 @@ assert.ok(workflowNames.length > 0, "expected GitHub Actions workflows");
 const violations = [];
 for (const name of workflowNames) {
   const workflow = await readFile(new URL(name, workflowsDirectory), "utf8");
-  for (const violation of workflowViolations(workflow)) {
+  for (const violation of workflowViolations(workflow, name)) {
     violations.push(`${name}: ${violation}`);
   }
 }
@@ -138,6 +159,21 @@ assert.deepEqual(
   workflowViolations(safeOrganizationPolicyWorkflow),
   [],
   "the immutable read-only organization policy is not a release publisher",
+);
+
+const safePrivateDependencyWorkflow = `${safePreamble}jobs:\n  verify:\n    steps:\n      - env:\n          CANONICAL_LIB_READ_TOKEN: \${{ secrets.CANONICAL_LIB_READ_TOKEN }}\n        run: bash scripts/prefetch-private-cargo.sh`;
+for (const workflowName of allowedReadOnlySecretWorkflows) {
+  assert.deepEqual(
+    workflowViolations(safePrivateDependencyWorkflow, workflowName),
+    [],
+    `the approved read-only dependency credential is not a release-publishing credential in ${workflowName}`,
+  );
+}
+assert.ok(
+  workflowViolations(safePrivateDependencyWorkflow, "unapproved.yml").includes(
+    "secret-backed credential",
+  ),
+  "the read-only credential exception must remain limited to reviewed workflow files",
 );
 
 const adversarialFixtures = [
