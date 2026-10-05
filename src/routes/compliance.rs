@@ -102,7 +102,7 @@ const CAPABILITIES: &[Capability] = &[
         title: "Trust center",
         summary: "Publish approved security and compliance resources with public, gated, NDA, and approved-only access.",
         api_path: "/v1/grc/trust-centers",
-        tables: &["trust_centers", "trust_center_resources", "trust_center_access_requests"],
+        tables: &["trust_centers", "trust_center_resources", "trust_center_access_requests", "trust_center_access_grants"],
         workflows: &["Publish approved resources", "Request access", "Enforce NDA gates", "Approve or revoke access", "Retire stale material"],
     },
     Capability {
@@ -279,5 +279,14 @@ mod tests {
             assert!(!item.tables.is_empty());
             assert!(!item.tables.iter().any(|table| table.contains("secret")));
         }
+        let trust_center = CAPABILITIES
+            .iter()
+            .find(|item| item.key == "trust_center")
+            .expect("trust center capability");
+        assert!(
+            trust_center
+                .tables
+                .contains(&"trust_center_access_grants")
+        );
     }
 }
