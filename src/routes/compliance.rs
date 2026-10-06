@@ -249,12 +249,7 @@ fn render_detail(actor: &AuthContext, capability: &Capability) -> Markup {
                 }
                 section class="card" {
                     h2 { "Persistence boundary" }
-                    p class="muted" { "Private ORM tables; application code must use typed domain operations rather than generic SQL." }
-                    div {
-                        @for table in capability.tables {
-                            span class="pill" { code { (table) } }
-                        }
-                    }
+                    p class="muted" { "Tenant-scoped private persistence is available only through typed domain operations; internal table names and generic SQL surfaces are not exposed here." }
                 }
             }
         },
