@@ -47,7 +47,7 @@ jobs:
           expected_declarations: '["CanonicalReadiness.DateString","CanonicalReadiness.FrameworkId","CanonicalReadiness.Identifier","CanonicalReadiness.ReadinessAnswer","CanonicalReadiness.ReadinessContext","CanonicalReadiness.ReadinessResponse","CanonicalReadiness.ReadinessStatus"]'
           verification: .typespec-json-schema-validator/web-readiness-consumer-verification.json
       - name: Prove altered evidence and incomplete scopes fail closed downstream
-        uses: ORESoftware/typespec-json-schema-validator/actions/test-consumer-admission@2281843126ab644607b11cf8281d84f382d68dfc
+        uses: ORESoftware/typespec-json-schema-validator/actions/test-consumer-admission@5fdbeaf57d582b69126c6e1a0623b43bc2a25d04
         with:
           contract_ir: .typespec-json-schema-validator/web-readiness-contract-ir.json
           report: .typespec-json-schema-validator/web-readiness-report.json
