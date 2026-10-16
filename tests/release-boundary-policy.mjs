@@ -53,11 +53,29 @@ const publisherSignals = [
 ];
 
 function executableWorkflowText(workflow) {
-  // Backslash-newline belongs to the same shell command. Normalize it
-  // before scanning to reject publishing verbs split across physical lines.
-  return workflow
-    .replace(/^\s*#.*$/gm, "")
-    .replace(/\\\r?\n[ \t]*/g, " ");
+  const lines = workflow.replace(/^\s*#.*$/gm, "").split(/\r?\n/);
+  const foldedRuns = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const marker = lines[index].match(/^([ \t]*)(?:-\s*)?run\s*:\s*>[-+]?\s*$/);
+    if (!marker) continue;
+    const baseIndent = marker[1].length;
+    const fragments = [];
+    let contentIndent = null;
+    for (let next = index + 1; next < lines.length; next += 1) {
+      const line = lines[next];
+      if (!line.trim()) continue;
+      const indentation = /^[ \t]*/.exec(line)[0].length;
+      if (indentation <= baseIndent) break;
+      if (contentIndent === null) contentIndent = indentation;
+      if (indentation < contentIndent) break;
+      fragments.push(line.trim());
+    }
+    // YAML's > and >- fold normal command lines together. Retain a
+    // conservative flattened copy to catch publish commands split by YAML.
+    if (fragments.length) foldedRuns.push(fragments.join(" "));
+  }
+  // Backslash-newline is a single shell command, including in literal blocks.
+  return [...lines, ...foldedRuns].join("\n").replace(/\\\r?\n[ \t]*/g, " ");
 }
 
 function hasReadOnlyTopLevelPermissions(workflow) {
