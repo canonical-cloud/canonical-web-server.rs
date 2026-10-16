@@ -19,6 +19,21 @@ test("accepts approved read-only workflows", () => {
     "the immutable read-only organization policy is not a release publisher",
   );
   assert.deepEqual(workflowViolations(`${safePreamble}jobs:\n  ok:\n    steps:\n      - run: >\n          echo safe\n          echo harmless`), []);
+  assert.deepEqual(
+    workflowViolations(`${safePreamble}jobs:\n  validate:\n    steps:\n      - run: echo "hello world"`),
+    [],
+    "normal read-only command is allowed",
+  );
+  assert.deepEqual(
+    workflowViolations(`${safePreamble}jobs: {validate: {"uses": "canonical-cloud/.github/.github/workflows/reusable-policy.yml@0ea46201f6a0055aa5d28c465488394d3c2c56c0"}}`),
+    [],
+    "exact allowlisted flow-style reusable workflow is permitted",
+  );
+  assert.deepEqual(
+    workflowViolations(`${safePreamble}jobs:\n  test:\n    steps:\n      - run: |\n          # git push origin main\n          echo benign`),
+    [],
+    "standalone shell comments do not trigger release detector",
+  );
 });
 
 const adversarialFixtures = [
@@ -102,6 +117,38 @@ const adversarialFixtures = [
   [
     "outbound reusable workflow",
     "jobs:\n  release:\n    uses: example/publisher/.github/workflows/release.yml@main",
+  ],
+  ["Git push command", "run: git push --tags origin main"],
+  ["Git push command", "run: git -c credential.helper= push origin refs/tags/v1"],
+  ["Git push command", "run: >\n  git\n  push --follow-tags"],
+  ["GitHub release publishing", "run: gh release create v1 --generate-notes"],
+  ["GitHub release publishing", "run: gh release upload v1 artifact.tar.gz"],
+  ["GitHub release publishing", "run: >-\n  gh release\n  edit v1 --draft=false"],
+  ["npm dist-tag mutation", "run: npm dist-tag add my-pkg@1.0 latest"],
+  ["npm dist-tag mutation", "run: npm dist-tag rm my-pkg next"],
+  [
+    "generic write permission",
+    'jobs:\n  deploy:\n    permissions:\n      deployments: write',
+  ],
+  [
+    "generic write permission",
+    'jobs: {deploy: {permissions: {"actions": "write"}}}',
+  ],
+  [
+    "inline publishing action input",
+    'jobs:\n  deploy:\n    steps:\n      - uses: docker/build-push-action@abc\n        with: { push: true, tags: my-image }',
+  ],
+  [
+    "outbound reusable workflow",
+    'jobs: {release: {"uses": "attacker/repo/.github/workflows/release.yml@abc"}}',
+  ],
+  [
+    "outbound reusable workflow",
+    "jobs:\n  release:\n    uses: attacker/repo/.github/workflows/release.yml@abc",
+  ],
+  [
+    "folded reusable workflow reference",
+    "jobs:\n  release:\n    uses: >\n      attacker/repo/.github/workflows/release.yml@abc",
   ],
   ["inbound reusable workflow", "on:\n  workflow_call:"],
 ];
