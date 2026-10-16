@@ -25,6 +25,19 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Verify exact checked-out PR commit and log Git tree
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          tree="$(git rev-parse HEAD^{tree})"
+          if [[ "$actual" != "$EXPECTED_HEAD" ]]; then
+            echo "::error::Checkout mismatch; expected $EXPECTED_HEAD but got $actual"
+            exit 1
+          fi
+          printf 'Verified head commit: %s\nVerified source Git-tree: %s\n' "$actual" "$tree"
       - name: Install Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
