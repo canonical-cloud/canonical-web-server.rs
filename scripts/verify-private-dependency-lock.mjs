@@ -18,9 +18,12 @@ export function verifyPrivateDependencyLock(manifest, lockfile) {
   assert.match(lockfile, /^version\s*=\s*\d+\s*$/m, "Cargo.lock version is required");
   assert.match(lockfile, /^\[\[package\]\]\s*$/m, "Cargo.lock package entries required");
 
-  const dependencySection = manifest.match(/^\[dependencies\]\s*$([\s\S]*?)(?=^\[|\s*$)/m);
-  assert.ok(dependencySection, "Cargo.toml needs [dependencies]");
-  const dependencies = dependencySection[1].split(/\r?\n/);
+  const heading = /^\[dependencies\]\s*$/m.exec(manifest);
+  assert.ok(heading, "Cargo.toml needs [dependencies]");
+  const remainder = manifest.slice(heading.index + heading[0].length);
+  const nextSection = /^\[[^\r\n]+\]\s*$/m.exec(remainder);
+  const section = nextSection ? remainder.slice(0, nextSection.index) : remainder;
+  const dependencies = section.split(/\r?\n/);
   const manifestGit = new Map();
   for (const line of dependencies) {
     if (!/\bgit\s*=/.test(line)) continue;
