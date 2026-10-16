@@ -23,6 +23,12 @@ export function verifyPrivateDependencyLock(manifest, lockfile) {
   const remainder = manifest.slice(heading.index + heading[0].length);
   const nextSection = /^\[[^\r\n]+\]\s*$/m.exec(remainder);
   const section = nextSection ? remainder.slice(0, nextSection.index) : remainder;
+  // No build/dev/target/patch Git dependencies may silently escape the
+  // direct-dependency review. Any addition needs an explicit policy update.
+  const outsideDependencies = manifest.slice(0, heading.index) +
+    "\n" + (nextSection ? remainder.slice(nextSection.index) : "");
+  assert.doesNotMatch(outsideDependencies, /^[^#\r\n]*\bgit\s*=/gm,
+    "unreviewed Git reference outside [dependencies]");
   const dependencies = section.split(/\r?\n/);
   const manifestGit = new Map();
   for (const line of dependencies) {
