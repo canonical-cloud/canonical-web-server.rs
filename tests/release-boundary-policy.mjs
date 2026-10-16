@@ -111,14 +111,14 @@ function outboundReusableWorkflowViolations(workflow) {
   // Read-only allowlisted workflows are pinned to immutable SHAs. Catch both
   // normal uses forms and flow-style {"uses": "owner/..."} mappings.
   const pattern =
-    /(?:^|[{,]\s*)["']?uses["']?\s*:\s*["']?([^\s"'#,}]+\.github\/workflows\/[^\s"'#,}]+@[^\s"'#,}]+)["']?/gim;
+    /(?:^\s*|[{,]\s*)["']?uses["']?\s*:\s*["']?([^\s"'#,}]+\.github\/workflows\/[^\s"'#,}]+@[^\s"'#,}]+)["']?/gim;
   const violations = [...workflow.matchAll(pattern)]
     .map((match) => match[1])
     .filter((target) => !allowedReadOnlyReusableWorkflows.has(target))
     .map(() => "outbound reusable workflow");
   // A folded uses value is not a supported allowlisted call. Fail closed
   // instead of attempting to interpret YAML formatting ambiguities.
-  if (/(?:^|[{,]\s*)["']?uses["']?\s*:\s*[>|][-+]?/im.test(workflow)) {
+  if (/(?:^\s*|[{,]\s*)["']?uses["']?\s*:\s*[>|][-+]?/im.test(workflow)) {
     violations.push("folded reusable workflow reference");
   }
   return violations;
