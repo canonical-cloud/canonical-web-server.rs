@@ -58,7 +58,11 @@ const publisherSignals = [
 ];
 
 function executableWorkflowText(workflow) {
-  return workflow.replace(/^\s*#.*$/gm, "");
+  // Backslash-newline belongs to the same shell command. Normalize it
+  // before scanning to reject publishing verbs split across physical lines.
+  return workflow
+    .replace(/^\s*#.*$/gm, "")
+    .replace(/\\\r?\n[ \t]*/g, " ");
 }
 
 function hasReadOnlyTopLevelPermissions(workflow) {
@@ -173,6 +177,22 @@ const adversarialFixtures = [
   ],
   ["registry attestation upload", "with:\n  push-to-registry: true"],
   ["publishing action input", "with:\n  push: true"],
+  [
+    "Docker push command",
+    "run: |\n  docker image \\\n    push ghcr.io/x/app:sha",
+  ],
+  [
+    "Docker registry login command",
+    "run: |\n  docker \\\n    login ghcr.io",
+  ],
+  [
+    "Docker build push flag",
+    "run: |\n  docker buildx build \\\n    --push -t ghcr.io/x/app:sha .",
+  ],
+  [
+    "language package publishing command",
+    "run: |\n  npm \\\n    publish",
+  ],
   [
     "Docker push command",
     "run: docker --config /tmp/config image push ghcr.io/x/app:sha",
