@@ -49,6 +49,17 @@ const publisherSignals = [
   ],
   ["language package publishing command", /\b(?:npm|cargo)\s+publish\b/i],
   ["Python package upload command", /\btwine\s+upload\b/i],
+  ["Git push command", /\bgit\s+(?:-c\s+\S+\s+)*push\b/i],
+  ["GitHub release publishing", /\bgh\s+release\s+(?:create|upload|edit|delete)\b/i],
+  ["npm dist-tag mutation", /\bnpm\s+dist-tag\s+(?:add|rm)\b/i],
+  [
+    "generic write permission",
+    /(?:^\s*|[{,]\s*)["']?[a-z][\w-]*["']?\s*:\s*["']?write["']?(?:\s*(?:[,}]|#|$))/im,
+  ],
+  [
+    "inline publishing action input",
+    /[{,]\s*["']?push["']?\s*:\s*["']?true["']?\s*(?:[,}])/i,
+  ],
   ["inbound reusable workflow", /^\s*["']?workflow_call["']?\s*:/im],
 ];
 
@@ -97,14 +108,21 @@ function hasReadOnlyTopLevelPermissions(workflow) {
 }
 
 function outboundReusableWorkflowViolations(workflow) {
+  // Read-only allowlisted workflows are pinned to immutable SHAs. Catch both
+  // normal uses forms and flow-style {"uses": "owner/..."} mappings.
   const pattern =
-    /^\s*uses\s*:\s*["']?([^\s"'#]+\.github\/workflows\/[^\s"'#]+@[^\s"'#]+)["']?\s*(?:#.*)?$/gim;
-  return [...workflow.matchAll(pattern)]
+    /(?:^|[{,]\s*)["']?uses["']?\s*:\s*["']?([^\s"'#,}]+\.github\/workflows\/[^\s"'#,}]+@[^\s"'#,}]+)["']?/gim;
+  const violations = [...workflow.matchAll(pattern)]
     .map((match) => match[1])
     .filter((target) => !allowedReadOnlyReusableWorkflows.has(target))
     .map(() => "outbound reusable workflow");
+  // A folded uses value is not a supported allowlisted call. Fail closed
+  // instead of attempting to interpret YAML formatting ambiguities.
+  if (/(?:^|[{,]\s*)["']?uses["']?\s*:\s*[>|][-+]?/im.test(workflow)) {
+    violations.push("folded reusable workflow reference");
+  }
+  return violations;
 }
-
 export function workflowViolations(workflow) {
   const executable = executableWorkflowText(workflow);
   const violations = publisherSignals
