@@ -67,8 +67,14 @@ test("reject malformed or incomplete Cargo.lock", () => {
     assert.throws(() => verifyPrivateDependencyLock(toml, bad));
   }
 });
-test("do not mistake dependencies in a later Cargo.toml section for direct dependencies", () => {
-  const bad = toml.replace("[dev-dependencies]", "[dev-dependencies]\n" +
-    'external = { git = "https://example.com/other", rev = "' + "a".repeat(40) + '" }');
-  assert.equal(verifyPrivateDependencyLock(bad, lock).pinnedDependencies, 3);
+test("reject new Git dependencies in dev/build/target sections", () => {
+  for (const heading of ["[dev-dependencies]", "[build-dependencies]",
+    "[target.'cfg(unix)'.dependencies]"]) {
+    const bad = toml + "\n" + heading + "\n" +
+      'external = { git = "https://example.com/other", rev = "' + "a".repeat(40) + '" }';
+    assert.throws(() => verifyPrivateDependencyLock(bad, lock), /outside \[dependencies\]/);
+  }
+});
+test("permit ordinary registry dependencies in other sections", () => {
+  assert.equal(verifyPrivateDependencyLock(toml, lock).pinnedDependencies, 3);
 });
