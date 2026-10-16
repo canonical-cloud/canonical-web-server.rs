@@ -150,6 +150,26 @@ const adversarialFixtures = [
     "folded reusable workflow reference",
     "jobs:\n  release:\n    uses: >\n      attacker/repo/.github/workflows/release.yml@abc",
   ],
+  [
+    "inbound reusable workflow",
+    "on: {workflow_call: {}}",
+  ],
+  [
+    "inbound reusable workflow",
+    "on: [workflow_call, push]",
+  ],
+  [
+    "inbound reusable workflow",
+    'on: {"workflow_call": {}}',
+  ],
+  [
+    "inherited reusable-workflow secrets",
+    'jobs:\n  test: {secrets: inherit}',
+  ],
+  [
+    "inherited reusable-workflow secrets",
+    'jobs:\n  test: {"secrets": "inherit", uses: owner/repo/.github/workflows/test.yml@sha}',
+  ],
   ["inbound reusable workflow", "on:\n  workflow_call:"],
 ];
 
