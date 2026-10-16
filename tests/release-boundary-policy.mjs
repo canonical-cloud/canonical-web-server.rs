@@ -24,7 +24,7 @@ const publisherSignals = [
   ["secret-backed credential", /\$\{\{\s*secrets(?:\.|\[)/i],
   [
     "inherited reusable-workflow secrets",
-    /^\s*secrets\s*:\s*["']?inherit["']?\s*$/im,
+    /(?:^\s*|[{,]\s*)["']?secrets["']?\s*:\s*["']?inherit["']?(?=\s*(?:[,}]|#|$))/im,
   ],
   ["Docker registry login action", /\buses\s*:\s*["']?docker\/login-action@/i],
   [
@@ -60,7 +60,10 @@ const publisherSignals = [
     "inline publishing action input",
     /[{,]\s*["']?push["']?\s*:\s*["']?true["']?\s*(?:[,}])/i,
   ],
-  ["inbound reusable workflow", /^\s*["']?workflow_call["']?\s*:/im],
+  [
+    "inbound reusable workflow",
+    /(?:^|[{\[,\s])["']?workflow_call["']?\s*(?::|,|\]|})/im,
+  ],
 ];
 
 function executableWorkflowText(workflow) {
