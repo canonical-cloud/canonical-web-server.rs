@@ -26,6 +26,9 @@ const publisherSignals = [
     "OIDC write permission",
     /(?:^\s*|[{,]\s*)["']?id-token["']?\s*:\s*["']?write["']?/im,
   ],
+  ["untrusted issue-comment trigger", /^\s*issue_comment\s*:/im],
+  ["issue write permission", /(?:^\s*|[{,]\s*)["']?issues["']?\s*:\s*["']?write["']?/im],
+  ["pull request write permission", /(?:^\s*|[{,]\s*)["']?pull-requests["']?\s*:\s*["']?write["']?/im],
   ["secret-backed credential", /\$\{\{\s*secrets(?:\.|\[)/i],
   [
     "inherited reusable-workflow secrets",
@@ -158,6 +161,9 @@ const adversarialFixtures = [
     "OIDC write permission",
     "jobs:\n  release:\n    permissions:\n      id-token: write",
   ],
+  ["untrusted issue-comment trigger", "on:\n  issue_comment:\n    types: [created]"],
+  ["issue write permission", "jobs:\n  ops:\n    permissions:\n      issues: write"],
+  ["pull request write permission", "jobs:\n  ops:\n    permissions:\n      pull-requests: write"],
   ["secret-backed credential", "env:\n  TOKEN: ${{ secrets.REGISTRY_TOKEN }}"],
   [
     "inherited reusable-workflow secrets",
