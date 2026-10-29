@@ -1,0 +1,37 @@
+name: RustSec lockfile remediation gate
+
+on:
+  pull_request:
+    paths:
+      - "Cargo.lock"
+      - "scripts/rustsec-lock-floor.mjs"
+      - "scripts/remediate-rustsec-lock.sh"
+      - "tests/rustsec-lock-floor.test.mjs"
+      - ".github/workflows/rustsec-lock-floor.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  locked-advisory-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head without retained credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22"
+      - name: Test version floor parser and Tokio regression
+        run: node --test tests/rustsec-lock-floor.test.mjs
+      - name: Verify operator update script syntax
+        run: bash -n scripts/remediate-rustsec-lock.sh
+      - name: Reject known vulnerable locked Rust dependency versions
+        run: node scripts/rustsec-lock-floor.mjs
