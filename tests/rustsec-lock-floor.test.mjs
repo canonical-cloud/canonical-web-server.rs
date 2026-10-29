@@ -20,3 +20,11 @@ test('reject malformed lockfiles and ambiguous versions', () => {
   assert.throws(() => rustsecLockFindings('not a lockfile'), /Cargo.lock/);
   assert.throws(() => rustsecLockFindings(wrap(['tokio','1.54.0-rc1'])), /unreviewed package version/);
 });
+
+test('reject tracked packages redirected to an unreviewed Cargo registry', () => {
+  assert.throws(() => rustsecLockFindings(wrap(['tokio','1.54.1','registry+https://attacker.invalid/registry'])), /unreviewed registry origin/);
+  assert.throws(() => rustsecLockFindings(wrap(['rustls','0.23.46','sparse+https://attacker.invalid/registry'])), /unreviewed registry origin/);
+});
+test('ignore unrelated synthetic package named after an object prototype property', () => {
+  assert.deepEqual(rustsecLockFindings(wrap(['__proto__','0.1.0'])), []);
+});

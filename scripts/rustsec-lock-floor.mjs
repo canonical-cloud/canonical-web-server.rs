@@ -33,9 +33,11 @@ export function rustsecLockFindings(lock) {
   assert.match(lock, /^\[\[package\]\]\s*$/m, 'Cargo.lock packages required');
   for (const entry of lock.split(/^\[\[package\]\]\s*$/m).slice(1)) {
     const name = entry.match(/^name\s*=\s*"([^"]+)"\s*$/m)?.[1];
-    if (!name || !(name in rustsecFloors)) continue;
+    if (!name || !Object.hasOwn(rustsecFloors, name)) continue;
     const source = entry.match(/^source\s*=\s*"([^"]+)"\s*$/m)?.[1];
-    if (!source?.startsWith('registry+')) continue;
+    if (!source || source.startsWith('git+')) continue;
+    assert.equal(source, 'registry+https://github.com/rust-lang/crates.io-index',
+      name + ': unreviewed registry origin; RustSec lock floor applies to crates.io only');
     const version = entry.match(/^version\s*=\s*"([^"]+)"\s*$/m)?.[1];
     assert.ok(version, `${name}: missing lockfile version`);
     const minimum = rustsecFloors[name];
