@@ -43,6 +43,10 @@ export function verifyPrivateDependencyLock(manifest, lockfile) {
     assert.equal(url, allowedGitDependencies.get(packageName), "noncanonical Git URL: " + packageName);
     assert.match(rev, sha40, "dependency revision must be a full immutable SHA: " + packageName);
     assert.doesNotMatch(attributes, /(?:^|,)\s*(?:branch|tag)\s*=/, "branch or tag pin is not immutable");
+    const keys = [...attributes.matchAll(/(?:^|,)\s*([a-zA-Z0-9_-]+)\s*=/g)]
+      .map((match) => match[1]).sort();
+    assert.deepEqual(keys, ["git", "rev"],
+      "Git dependency attributes must be exactly git and immutable rev");
     manifestGit.set(packageName, { url, rev });
   }
   assert.equal(manifestGit.size, allowedGitDependencies.size, "exact expected Git dependency set required");

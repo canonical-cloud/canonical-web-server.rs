@@ -75,6 +75,25 @@ test("reject new Git dependencies in dev/build/target sections", () => {
     assert.throws(() => verifyPrivateDependencyLock(bad, lock), /outside \[dependencies\]/);
   }
 });
+test("reject unreviewed attributes in private Git inline dependency tables", () => {
+  for (const attribute of ['features = ["unsafe"]', 'optional = true', 'default-features = false']) {
+    const bad = toml.replace('rev = "' + pins[0][2] + '" }',
+      'rev = "' + pins[0][2] + '", ' + attribute + ' }');
+    assert.throws(() => verifyPrivateDependencyLock(bad, lock), /attributes must be exactly/);
+  }
+});
+
+test("pull-request offline pin workflow cannot read private credentials", async () => {
+  const workflow = await readFile(new URL("../.github/workflows/private-persistence-lock.yml", import.meta.url), "utf8");
+  assert.match(workflow, /^  pull_request:/m);
+  assert.match(workflow, /^permissions:\s*\n  contents: read$/m);
+  assert.match(workflow, /persist-credentials: false/);
+  assert.match(workflow, /node --test tests\/private-dependency-lock\.test\.mjs/);
+  assert.doesNotMatch(workflow, /\$\{\{\s*secrets[.\[]/);
+  assert.doesNotMatch(workflow, /(?:PRIVATE_.*TOKEN|CANONICAL_LIB_READ_TOKEN|GIT_CONFIG_KEY_\d+|x-access-token)/);
+  assert.doesNotMatch(workflow, /^\s+(?:contents|packages|actions|id-token): write\s*$/m);
+});
+
 test("permit ordinary registry dependencies in other sections", () => {
   assert.equal(verifyPrivateDependencyLock(toml, lock).pinnedDependencies, 3);
 });
