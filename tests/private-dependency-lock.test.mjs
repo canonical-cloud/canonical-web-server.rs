@@ -129,3 +129,58 @@ test("reject Git URL aliases that bypass exact canonical source identity", () =>
     assert.throws(() => verifyPrivateDependencyLock(bad,lock), /noncanonical Git URL/, alias);
   }
 });
+
+
+// defense-in-depth exact Cargo source tests; never resolve private Git in PR CI.
+test("reject source substitutions that retain correct package names and revision count",()=>{
+  const badUrl=lock.replace(
+    "git+https://github.com/canonical-cloud/canonical-lib-core",
+    "git+https://github.com/untrusted/canonical-lib-core");
+  assert.throws(()=>verifyPrivateDependencyLock(toml,badUrl),/locked Git source differs/);
+  const badRevision=lock.replace("?rev="+pins[1][2],"?rev="+"b".repeat(40));
+  assert.throws(()=>verifyPrivateDependencyLock(toml,badRevision),/locked Git source differs/);
+});
+
+test("reject a lockfile using a moving tag or branch even with the pinned fragment",()=>{
+  for(const selector of ["?branch=main#","?tag=v1#","?rev=main#"]){
+    const original="?rev="+pins[0][2]+"#";
+    const changed=lock.replace(original,selector);
+    assert.throws(()=>verifyPrivateDependencyLock(toml,changed),/locked Git source differs/);
+  }
+});
+
+test("reject unexpected private dependency aliases in Cargo.lock",()=>{
+  const altered=lock.replace('name = "canonical-lib"','name = "canonical-lib-alias"');
+  assert.throws(()=>verifyPrivateDependencyLock(toml,altered),/unexpected Git source/);
+});
+
+test("reject alternative manifest Git dependency packages and SSH schemes",()=>{
+  const original="https://github.com/canonical-cloud/canonical-orm-core";
+  for(const changed of [
+    "ssh://git@github.com/canonical-cloud/canonical-orm-core",
+    "git@github.com:canonical-cloud/canonical-orm-core",
+    "https://user:token@github.com/canonical-cloud/canonical-orm-core",
+    "https://github.com/canonical-cloud/canonical-orm-core/",
+  ]){
+    assert.throws(()=>verifyPrivateDependencyLock(toml.replace(original,changed),lock),/noncanonical Git URL/);
+  }
+});
+
+test("reject unreviewed extra git dependencies in target-specific manifests",()=>{
+  for(const section of [
+    "[target.'cfg(target_os = \"linux\")'.dependencies]",
+    "[target.'cfg(target_os = \"macos\")'.build-dependencies]",
+    "[target.'cfg(target_arch = \"aarch64\")'.dev-dependencies]",
+  ]){
+    const altered=toml+"\n"+section+"\n"+
+      'hostile = { git = "https://example.invalid/hostile", rev = "'+"f".repeat(40)+'" }\n';
+    assert.throws(()=>verifyPrivateDependencyLock(altered,lock),/outside \[dependencies\]/,section);
+  }
+});
+
+test("accepts unrelated ordinary registry lockfile packages without broadening Git allowlist",()=>{
+  const registryEntry='\n[[package]]\nname = "harmless-registry-dependency"\nversion = "0.1.0"\n'+
+    'source = "registry+https://github.com/rust-lang/crates.io-index"\n'+
+    'checksum = "'+"a".repeat(64)+'"\n';
+  assert.equal(verifyPrivateDependencyLock(toml,lock+registryEntry).pinnedDependencies,3);
+});
