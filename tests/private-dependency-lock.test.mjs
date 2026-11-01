@@ -97,3 +97,35 @@ test("pull-request offline pin workflow cannot read private credentials", async 
 test("permit ordinary registry dependencies in other sections", () => {
   assert.equal(verifyPrivateDependencyLock(toml, lock).pinnedDependencies, 3);
 });
+
+
+test("reject repeated manifest git/rev attributes in an inline table", () => {
+  const base='rev = "' + pins[0][2] + '"';
+  const duplicateRev=toml.replace(base,base+', '+base);
+  assert.throws(() => verifyPrivateDependencyLock(duplicateRev,lock), /exactly one quoted rev/);
+  const duplicateGit=toml.replace(
+    'git = "https://github.com/canonical-cloud/canonical-interfaces"',
+    'git = "https://github.com/canonical-cloud/canonical-interfaces", git = "https://github.com/canonical-cloud/canonical-interfaces"');
+  assert.throws(() => verifyPrivateDependencyLock(duplicateGit,lock), /exactly one quoted git/);
+});
+
+test("reject unapproved Git declarations in workspace and patch sections", () => {
+  for(const heading of ["[workspace.dependencies]", "[patch.crates-io]", "[target.'cfg(windows)'.build-dependencies]"]){
+    const bad=toml+"\n"+heading+"\n"+
+      'thirdparty = { git = "https://example.invalid/repo", rev = "'+"a".repeat(40)+'" }\n';
+    assert.throws(() => verifyPrivateDependencyLock(bad,lock), /outside \[dependencies\]/, heading);
+  }
+});
+
+test("reject Git URL aliases that bypass exact canonical source identity", () => {
+  for(const alias of [
+    "https://github.com/canonical-cloud/canonical-interfaces.git",
+    "http://github.com/canonical-cloud/canonical-interfaces",
+    "https://github.com/canonical-cloud/canonical-interfaces?ref=main",
+    "https://github.com/Canonical-Cloud/canonical-interfaces",
+    "https://github.com/canonical-cloud%2Fcanonical-interfaces",
+  ]){
+    const bad=toml.replace("https://github.com/canonical-cloud/canonical-interfaces",alias);
+    assert.throws(() => verifyPrivateDependencyLock(bad,lock), /noncanonical Git URL/, alias);
+  }
+});
