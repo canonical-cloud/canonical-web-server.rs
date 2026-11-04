@@ -1,0 +1,11 @@
+# RustSec lockfile remediation: trusted source-only procedure
+
+This checklist is for an **independently approved protected validation environment** that already has read-only access to the reviewed private `canonical-lib-core` and `canonical-orm-core` Git revisions. It must **not** be run as a secret-bearing `pull_request` job and must never publish a release or modify `main` directly.
+
+1. Check out the exact reviewed source commit and record both Git commit SHA and root tree SHA. Use a clean checkout and a new review branch.
+2. Install the pinned Rust 1.95.0 toolchain and `cargo-audit`; fetch private sources only under an approved read-only credential limited to those repositories. Keep credentials out of logs, URLs, Docker image layers, artifacts, compiler/build-script environments, and source commits. Run any authenticated prefetch in a separate step; scrub credentials before compilation and metadata/audit commands.
+3. Execute `bash scripts/remediate-rustsec-lock.sh` **after** private Git sources and registry index are accessible in the approved environment. This invokes Cargo's resolver for seven specific vulnerable locked packages, not a text/checksum rewrite. It intentionally rejects a dirty `Cargo.lock` and aborts if Cargo cannot resolve any target. No fallbacks to mutable branch pins or blanket RustSec advisory ignores are allowed.
+4. Verify `node scripts/rustsec-lock-floor.mjs` and `cargo audit` both succeed. The floor checker detects the known seven package families only; it does **not** replace the full advisory database check. Tokio 1.54.0 is explicitly forbidden due to RUSTSEC-2026-0384 even though it is numerically newer than 1.53.3.
+5. Produce a normal pull request containing the **Cargo-resolved** `Cargo.lock` with its real checksums and dependency changes. Run exact-head Rust formatting, Clippy, tests, both databases, QUIC/TLS cases, bounded rkyv graph checks, image build, and security scans with executed job steps. Check that `Cargo.lock` still pins the three approved immutable private Git revisions. No release or merge until independently approved and all required gates pass.
+
+**Current constraint:** PR review and source-only checks cannot supply access to private Cargo dependencies. These instructions intentionally do not fabricate a new lockfile or claim that privileged CI ran.
