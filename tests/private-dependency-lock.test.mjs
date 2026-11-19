@@ -189,8 +189,8 @@ test("reject local dependency edges introduced from child manifests", () => {
 
 
 test("reject repository-local Cargo configuration that could redirect pinned Git sources", () => {
-  rejectRepositoryCargoOverrides(["Cargo.toml", "crates/canonical-auth/Cargo.toml"]);
-  for (const path of [".cargo", ".cargo/config", ".cargo/config.toml",
+  rejectRepositoryCargoOverrides(["Cargo.toml", ".cargo/audit.toml", "crates/canonical-auth/Cargo.toml"]);
+  for (const path of [".cargo/config", ".cargo/config.toml", ".cargo/credentials", ".cargo/credentials.toml",
     "crates/canonical-auth/.cargo/config.toml",
     "services/canonical-session-revoker/.cargo/config"]) {
     assert.throws(() => rejectRepositoryCargoOverrides([path]),
