@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { lstat, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { posix as pathPosix } from "node:path";
 
 const allowedGitDependencies = new Map([
   ["canonical-interfaces", "https://github.com/canonical-cloud/canonical-interfaces"],
@@ -130,6 +131,26 @@ export function verifyWorkspaceMemberGitSources(rootManifest, memberManifests) {
     const active = content.replace(/^\s*#.*$/gm, "");
     assert.doesNotMatch(active, /\bgit\s*=/,
       "unapproved Git source in workspace member: " + member);
+  }
+  // Cargo can auto-admit a local path dependency that was not listed in
+  // workspace.members. Require each path edge to stay inside reviewed members.
+  const allManifests = new Map([[".", rootManifest], ...memberManifests]);
+  const allowedLocalTargets = new Set(members);
+  for (const [member, content] of allManifests) {
+    for (const line of content.split(/\r?\n/)) {
+      if (line.trimStart().startsWith("#") || !/\bpath\s*=/.test(line)) continue;
+      const assignment = line.match(/^\s*[A-Za-z0-9_-]+\s*=\s*\{([^}\n]+)\}\s*(?:#.*)?$/);
+      assert.ok(assignment, "local Cargo dependency must be an auditable inline table: " + member);
+      const matches = [...assignment[1].matchAll(/(?:^|,)\s*path\s*=\s*"([^"]*)"/g)];
+      assert.equal(matches.length, 1, "one literal path reference required: " + member);
+      const local = matches[0][1];
+      assert.match(local, /^[A-Za-z0-9_.\/-]+$/,
+        "local Cargo path must be literal and reviewable: " + member);
+      assert.ok(!pathPosix.isAbsolute(local), "absolute Cargo dependency path forbidden: " + member);
+      const resolved = pathPosix.normalize(pathPosix.join(member === "." ? "" : member, local));
+      assert.ok(allowedLocalTargets.has(resolved) && resolved !== member,
+        "local Cargo dependency leaves reviewed workspace: " + member + " -> " + local);
+    }
   }
   return { checkedMembers: members.length - 1 };
 }
