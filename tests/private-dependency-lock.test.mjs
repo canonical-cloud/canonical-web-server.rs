@@ -158,3 +158,31 @@ test("reject a registry or local shadow of an approved locked Git package", () =
   assert.throws(() => verifyPrivateDependencyLock(toml, lock + "\n" + localShadow),
     /must use its pinned Git source/);
 });
+
+
+test("allow reviewed local Cargo path edges inside the workspace", () => {
+  const members = fixtureMembers();
+  const root = workspaceManifest.replace('[package]\nname = "root"',
+    '[package]\nname = "root"\n[dependencies]\nauth = { path = "crates/canonical-auth" }');
+  members.set("crates/canonical-session", safeWorkspaceMember +
+    'store = { path = "../canonical-store" }\n');
+  assert.equal(verifyWorkspaceMemberGitSources(root, members).checkedMembers, 5);
+});
+
+test("reject local dependency edges to external or undeclared packages", () => {
+  for (const target of ["../external", "crates/hidden", "/tmp/private", "crates\\evil"]) {
+    const members = fixtureMembers();
+    const root = workspaceManifest.replace('[package]\nname = "root"',
+      '[package]\nname = "root"\n[dependencies]\nevil = { path = "' + target.replaceAll("\\", "\\\\") + '" }');
+    assert.throws(() => verifyWorkspaceMemberGitSources(root, members),
+      /local Cargo (dependency leaves reviewed workspace|path must be literal|dependency path forbidden)|absolute Cargo dependency/);
+  }
+});
+
+test("reject local dependency edges introduced from child manifests", () => {
+  const members = fixtureMembers();
+  members.set("crates/canonical-session", safeWorkspaceMember +
+    'evil = { path = "../../../unreviewed", package = "secret" }\n');
+  assert.throws(() => verifyWorkspaceMemberGitSources(workspaceManifest, members),
+    /leaves reviewed workspace/);
+});
