@@ -107,25 +107,7 @@ jobs:
           fi
       - name: Assert vulnerable rkyv is not in the active Linux build graph
         shell: bash
-        run: |
-          set -euo pipefail
-          # RUSTSEC-2026-0235 affects rkyv 0.7.46. Cargo retains optional
-          # packages in Cargo.lock even when their activating feature is
-          # disabled. Prove that no normal, build, or dev edge reaches it for
-          # the production Linux target before applying the narrow audit ignore.
-          active_path="$(cargo tree \
-            --workspace \
-            --locked \
-            --target x86_64-unknown-linux-gnu \
-            --invert rkyv@0.7.46 \
-            --edges normal,build,dev \
-            --prefix none 2>/dev/null || true)"
-          if [ -n "$active_path" ]; then
-            printf '%s\n' "$active_path" >&2
-            echo "vulnerable rkyv entered the active Linux dependency graph" >&2
-            exit 1
-          fi
-          echo "rkyv 0.7.46 is absent from the active Linux dependency graph"
+        run: bash scripts/check-rkyv-active-graph.sh
       - name: Audit Rust dependencies
         shell: bash
         run: |
