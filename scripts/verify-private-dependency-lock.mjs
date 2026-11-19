@@ -156,22 +156,27 @@ export function verifyWorkspaceMemberGitSources(rootManifest, memberManifests) {
 }
 
 export function rejectRepositoryCargoOverrides(paths) {
-  for (const path of paths) {
-    assert.doesNotMatch(path, /(?:^|\/)\.cargo(?:\/|$)/,
-      "repository-scoped Cargo config requires independent admission: " + path);
+  for (const candidate of paths) {
+    assert.doesNotMatch(candidate,
+      /(?:^|\/)\.cargo\/(?:config|config\.toml|credentials|credentials\.toml)$/,
+      "repository-scoped Cargo config requires independent admission: " + candidate);
   }
 }
 
 async function rejectCheckedOutCargoOverrides(rootManifest) {
   for (const member of workspaceMembers(rootManifest)) {
-    const directory = new URL("../" + (member === "." ? "" : member + "/") + ".cargo", import.meta.url);
-    try {
-      await lstat(fileURLToPath(directory));
-    } catch (error) {
-      if (error?.code === "ENOENT") continue;
-      throw error;
+    const prefix = member === "." ? "" : member + "/";
+    for (const filename of ["config", "config.toml", "credentials", "credentials.toml"]) {
+      const candidate = prefix + ".cargo/" + filename;
+      const url = new URL("../" + candidate, import.meta.url);
+      try {
+        await lstat(fileURLToPath(url));
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        throw error;
+      }
+      rejectRepositoryCargoOverrides([candidate]);
     }
-    rejectRepositoryCargoOverrides([(member === "." ? "" : member + "/") + ".cargo"]);
   }
 }
 
