@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "Cargo.toml"
+      - ".cargo/**"
       - "Cargo.lock"
       - "src/**"
       - "crates/**"
@@ -15,6 +16,7 @@ on:
     branches: [main, dev]
     paths:
       - "Cargo.toml"
+      - ".cargo/**"
       - "Cargo.lock"
       - "src/**"
       - "crates/**"
