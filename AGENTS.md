@@ -1,3 +1,3 @@
-# Agent instructions — canonical-web-server.rs
+# Agent instructions
 
-Canonical repository policy and command-safety rules are maintained in [agents.md](agents.md). Read that file before editing or running commands.
+Canonical repository instructions live in [`agents.md`](agents.md).
