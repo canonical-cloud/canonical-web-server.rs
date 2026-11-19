@@ -200,6 +200,6 @@ test("reject repository-local Cargo configuration that could redirect pinned Git
 
 test("offline pin workflow watches Cargo configuration paths", async () => {
   const workflow = await readFile(new URL("../.github/workflows/private-persistence-lock.yml", import.meta.url), "utf8");
-  assert.equal((workflow.match(/"\\.cargo\\/\\*\\*"/g) ?? []).length, 2,
+  assert.equal(workflow.split('".cargo/**"').length - 1, 2,
     "both push and pull_request must trigger checks on root Cargo configuration changes");
 });
