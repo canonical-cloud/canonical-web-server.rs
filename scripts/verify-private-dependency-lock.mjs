@@ -155,6 +155,26 @@ export function verifyWorkspaceMemberGitSources(rootManifest, memberManifests) {
   return { checkedMembers: members.length - 1 };
 }
 
+export function rejectRepositoryCargoOverrides(paths) {
+  for (const path of paths) {
+    assert.doesNotMatch(path, /(?:^|\/)\.cargo(?:\/|$)/,
+      "repository-scoped Cargo config requires independent admission: " + path);
+  }
+}
+
+async function rejectCheckedOutCargoOverrides(rootManifest) {
+  for (const member of workspaceMembers(rootManifest)) {
+    const directory = new URL("../" + (member === "." ? "" : member + "/") + ".cargo", import.meta.url);
+    try {
+      await lstat(fileURLToPath(directory));
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
+    rejectRepositoryCargoOverrides([(member === "." ? "" : member + "/") + ".cargo"]);
+  }
+}
+
 async function readCheckedWorkspaceMembers(rootManifest) {
   const manifests = new Map();
   for (const member of workspaceMembers(rootManifest)) {
@@ -171,6 +191,7 @@ if (process.argv[1] && import.meta.url === new URL("file://" + process.argv[1]).
   const manifest = await readFile(new URL("../Cargo.toml", import.meta.url), "utf8");
   const lockfile = await readFile(new URL("../Cargo.lock", import.meta.url), "utf8");
   const result = verifyPrivateDependencyLock(manifest, lockfile);
+  await rejectCheckedOutCargoOverrides(manifest);
   const checked = await readCheckedWorkspaceMembers(manifest);
   console.log("Offline immutable Git dependency contract passed:", result.pinnedDependencies,
     "pinned dependencies and", checked.checkedMembers,
