@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { verifyPrivateDependencyLock } from "../scripts/verify-private-dependency-lock.mjs";
+import { verifyPrivateDependencyLock, workspaceMembers, verifyWorkspaceMemberGitSources } from "../scripts/verify-private-dependency-lock.mjs";
 
 const pins = [
   ["canonical-interfaces", "canonical-interfaces", "0cab33c2b2a494d2368ef1da0ebe5d614b3a96ef"],
@@ -77,4 +77,84 @@ test("reject new Git dependencies in dev/build/target sections", () => {
 });
 test("permit ordinary registry dependencies in other sections", () => {
   assert.equal(verifyPrivateDependencyLock(toml, lock).pinnedDependencies, 3);
+});
+
+
+const safeWorkspaceMember = '[package]\nname = "fixture"\nversion = "0.1.0"\n[dependencies]\nserde = "1"\n';
+const workspaceManifest = '[workspace]\nmembers = [".", "crates/canonical-auth", "crates/canonical-config", "crates/canonical-session", "crates/canonical-store", "services/canonical-session-revoker"]\nresolver = "2"\n[package]\nname = "root"\n';
+const fixtureMembers = () => new Map(workspaceMembers(workspaceManifest)
+  .filter((member) => member !== ".").map((member) => [member, safeWorkspaceMember]));
+
+test("audit the checked-in root and every reviewed workspace member", async () => {
+  const root = await readFile(new URL("../Cargo.toml", import.meta.url), "utf8");
+  const manifests = new Map();
+  for (const member of workspaceMembers(root)) {
+    if (member === ".") continue;
+    manifests.set(member, await readFile(new URL("../" + member + "/Cargo.toml", import.meta.url), "utf8"));
+  }
+  assert.equal(verifyWorkspaceMemberGitSources(root, manifests).checkedMembers, 5);
+});
+
+test("allow only the reviewed workspace member set without Git sources", () => {
+  assert.equal(verifyWorkspaceMemberGitSources(workspaceManifest, fixtureMembers()).checkedMembers, 5);
+});
+
+test("reject hidden Git dependencies in every workspace member section", () => {
+  for (const section of ["[dependencies]", "[build-dependencies]", "[dev-dependencies]",
+    "[target.'cfg(unix)'.dependencies]", "[patch.crates-io]", "[workspace.dependencies]"]) {
+    const manifests = fixtureMembers();
+    manifests.set("crates/canonical-auth",
+      safeWorkspaceMember + "\n" + section + '\nevil = { git = "https://example.org/attacker", rev = "' +
+      "a".repeat(40) + '" }\n');
+    assert.throws(() => verifyWorkspaceMemberGitSources(workspaceManifest, manifests),
+      /unapproved Git source/);
+  }
+});
+
+test("reject missing, extra, or nonpackage workspace manifests", () => {
+  const missing = fixtureMembers();
+  missing.delete("crates/canonical-auth");
+  assert.throws(() => verifyWorkspaceMemberGitSources(workspaceManifest, missing),
+    /all non-root workspace members/);
+  const extra = fixtureMembers();
+  extra.set("crates/unreviewed", safeWorkspaceMember);
+  assert.throws(() => verifyWorkspaceMemberGitSources(workspaceManifest, extra),
+    /all non-root workspace members/);
+  const malformed = fixtureMembers();
+  malformed.set("crates/canonical-auth", "[dependencies]\nserde = '1'\n");
+  assert.throws(() => verifyWorkspaceMemberGitSources(workspaceManifest, malformed),
+    /normal package/);
+});
+
+test("reject additional, duplicate, or traversing workspace member paths", () => {
+  const renamed = workspaceManifest.replace('"crates/canonical-auth"', '"crates/attacker"');
+  assert.throws(() => verifyWorkspaceMemberGitSources(renamed, fixtureMembers()),
+    /policy review/);
+  const duplicate = workspaceManifest.replace('"crates/canonical-auth"', '"crates/canonical-config"');
+  assert.throws(() => verifyWorkspaceMemberGitSources(duplicate, fixtureMembers()),
+    /duplicate workspace member/);
+  const traversal = workspaceManifest.replace('"crates/canonical-auth"', '"../outside"');
+  assert.throws(() => verifyWorkspaceMemberGitSources(traversal, fixtureMembers()),
+    /safe literal relative path/);
+  const wildcard = workspaceManifest.replace('"crates/canonical-auth"', '"crates/*"');
+  assert.throws(() => verifyWorkspaceMemberGitSources(wildcard, fixtureMembers()),
+    /safe literal relative path/);
+});
+
+test("reject unsupported Git dependency alias, path, and feature attributes", () => {
+  for (const extra of ['package = "unexpected"', 'path = "../elsewhere"', 'features = ["unsafe"]']) {
+    const bad = toml.replace('rev = "' + pins[0][2] + '" }',
+      'rev = "' + pins[0][2] + '", ' + extra + ' }');
+    assert.throws(() => verifyPrivateDependencyLock(bad, lock),
+      /only approved git and rev keys/);
+  }
+});
+
+test("reject a registry or local shadow of an approved locked Git package", () => {
+  const shadow = '[[package]]\nname = "canonical-lib"\nversion = "2.0.0"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n';
+  assert.throws(() => verifyPrivateDependencyLock(toml, lock + "\n" + shadow),
+    /must use its pinned Git source/);
+  const localShadow = '[[package]]\nname = "canonical-lib"\nversion = "2.0.0"\n';
+  assert.throws(() => verifyPrivateDependencyLock(toml, lock + "\n" + localShadow),
+    /must use its pinned Git source/);
 });
