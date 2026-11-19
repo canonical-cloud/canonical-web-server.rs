@@ -63,7 +63,7 @@ jobs:
         run: cargo +1.95.0 check --workspace --all-targets --all-features --locked
       - name: Retain generated lock
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: private-persistence-lock-${{ github.run_id }}
           path: target/lock-evidence/Cargo.lock.generated
