@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { verifyPrivateDependencyLock, workspaceMembers, verifyWorkspaceMemberGitSources } from "../scripts/verify-private-dependency-lock.mjs";
+import { verifyPrivateDependencyLock, workspaceMembers, verifyWorkspaceMemberGitSources, rejectRepositoryCargoOverrides } from "../scripts/verify-private-dependency-lock.mjs";
 
 const pins = [
   ["canonical-interfaces", "canonical-interfaces", "0cab33c2b2a494d2368ef1da0ebe5d614b3a96ef"],
@@ -185,4 +185,21 @@ test("reject local dependency edges introduced from child manifests", () => {
     'evil = { path = "../../../unreviewed", package = "secret" }\n');
   assert.throws(() => verifyWorkspaceMemberGitSources(workspaceManifest, members),
     /leaves reviewed workspace/);
+});
+
+
+test("reject repository-local Cargo configuration that could redirect pinned Git sources", () => {
+  rejectRepositoryCargoOverrides(["Cargo.toml", "crates/canonical-auth/Cargo.toml"]);
+  for (const path of [".cargo", ".cargo/config", ".cargo/config.toml",
+    "crates/canonical-auth/.cargo/config.toml",
+    "services/canonical-session-revoker/.cargo/config"]) {
+    assert.throws(() => rejectRepositoryCargoOverrides([path]),
+      /independent admission/);
+  }
+});
+
+test("offline pin workflow watches Cargo configuration paths", async () => {
+  const workflow = await readFile(new URL("../.github/workflows/private-persistence-lock.yml", import.meta.url), "utf8");
+  assert.equal((workflow.match(/"\\.cargo\\/\\*\\*"/g) ?? []).length, 2,
+    "both push and pull_request must trigger checks on root Cargo configuration changes");
 });
